@@ -1,0 +1,36 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EmotionKit verbinden",
+        "description": "Die Integration verbindet sich automatisch mit https://emotionkit.de. Gib einen Gerätenamen ein.",
+        "data": {
+          "device_name": "Gerätename"
+        }
+      },
+      "claim": {
+        "title": "Claim-Code eingeben",
+        "description": "Gib diesen Code in der EmotionKit Web-Oberfläche ein, um das Gerät zu registrieren:\n\n**{claim_code}**\n\nÖffne https://emotionkit.de und gib den Code dort ein. Klicke dann auf Absenden, sobald du den Code eingegeben hast."
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum EmotionKit-Server fehlgeschlagen.",
+      "claim_timeout": "Zeitüberschreitung — der Code wurde nicht rechtzeitig eingegeben. Bitte erneut versuchen.",
+      "claim_failed": "Registrierung fehlgeschlagen. Der Code ist möglicherweise abgelaufen."
+    },
+    "abort": {
+      "already_configured": "Dieses Gerät ist bereits konfiguriert."
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "bomb_planted": "Bombe gelegt",
+      "bomb_defused": "Bombe entschärft",
+      "bomb_exploded": "Bombe explodiert",
+      "round_live": "Runde gestartet",
+      "round_over_t": "Terroristen gewinnen",
+      "round_over_ct": "Counter-Terrorists gewinnen",
+      "freezetime": "Freezetime"
+    }
+  }
+}

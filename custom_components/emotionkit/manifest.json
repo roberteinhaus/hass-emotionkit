@@ -1,0 +1,12 @@
+{
+  "domain": "emotionkit",
+  "name": "EmotionKit",
+  "codeowners": ["@emotionkit"],
+  "config_flow": true,
+  "documentation": "https://emotionkit.de/docs/homeassistant",
+  "integration_type": "service",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://gitlab.com/emotionkit/emotionkit-cloud/-/issues",
+  "requirements": ["aiomqtt>=2.3.0"],
+  "version": "1.0.0"
+}

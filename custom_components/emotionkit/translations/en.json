@@ -1,0 +1,36 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to EmotionKit",
+        "description": "The integration connects automatically to https://emotionkit.de. Enter a device name.",
+        "data": {
+          "device_name": "Device name"
+        }
+      },
+      "claim": {
+        "title": "Enter claim code",
+        "description": "Enter this code in the EmotionKit web interface to register the device:\n\n**{claim_code}**\n\nOpen https://emotionkit.de and enter the code there. Then click submit once you have entered the code."
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the EmotionKit server.",
+      "claim_timeout": "Timeout — the code was not entered in time. Please try again.",
+      "claim_failed": "Registration failed. The code may have expired."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "bomb_planted": "Bomb planted",
+      "bomb_defused": "Bomb defused",
+      "bomb_exploded": "Bomb exploded",
+      "round_live": "Round started",
+      "round_over_t": "Terrorists win",
+      "round_over_ct": "Counter-Terrorists win",
+      "freezetime": "Freeze time"
+    }
+  }
+}
