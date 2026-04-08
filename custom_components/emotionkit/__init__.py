@@ -8,6 +8,7 @@ import logging
 import ssl
 from urllib.parse import urlparse
 
+import aiohttp
 import aiomqtt
 
 from homeassistant.config_entries import ConfigEntry
@@ -15,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
+    DEFAULT_CONTROL_PLANE_URL,
     DEVICE_KIND,
     DOMAIN,
     EVENT_BOMB_DEFUSED,
@@ -42,9 +44,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     mqtt_username: str = entry.data["mqtt_username"]
     mqtt_password: str = entry.data["mqtt_password"]
-    mqtt_broker: str = entry.data["mqtt_broker"]
+    mqtt_broker: str = entry.data.get("mqtt_broker", "")
     device_name: str = entry.data.get("device_name", "EmotionKit")
     device_id: str = entry.data["device_id"]
+    control_plane_url: str = entry.data.get(
+        "control_plane_url", DEFAULT_CONTROL_PLANE_URL
+    )
+
+    # Resolve broker URL if missing from stored config (legacy installs).
+    if not mqtt_broker:
+        mqtt_broker = await _resolve_broker_url(control_plane_url)
+        _LOGGER.info("Resolved MQTT broker URL to %s", mqtt_broker)
 
     # Parse broker URL (tcp://host:port or tls://host:port).
     host, port, use_tls = _parse_broker_url(mqtt_broker)
@@ -132,6 +142,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         # Each subject's latest match_fingerprint is tracked.
                         # The active match is determined by role priority:
                         # owner > admin majority > user majority.
+                        if not state._config_received:
+                            _LOGGER.debug("Skipping event until config is received")
+                            continue
+
                         if state._allowed_subjects:
                             subject = _subject_from_payload(message.payload)
                             fp = _fingerprint_from_payload(message.payload)
@@ -206,6 +220,35 @@ def _parse_broker_url(url: str) -> tuple[str, int, bool]:
     return host, port, use_tls
 
 
+async def _resolve_broker_url(control_plane_url: str) -> str:
+    """Fetch the MQTT broker URL from the control-plane, with fallback."""
+    info_url = f"{control_plane_url.rstrip('/')}/api/v1/info"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                info_url, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    broker = data.get("mqtt_broker_url", "")
+                    if broker:
+                        return broker
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("Could not fetch broker URL from %s", info_url)
+
+    # Fallback: derive from control-plane hostname.
+    return _derive_broker_url(control_plane_url)
+
+
+def _derive_broker_url(control_plane_url: str) -> str:
+    """Best-effort derivation of broker URL from the control-plane URL."""
+    parsed = urlparse(control_plane_url)
+    host = parsed.hostname or "localhost"
+    if parsed.scheme == "https":
+        return f"tls://{host}:8883"
+    return f"tcp://{host}:1883"
+
+
 class _GameState:
     """Track last-known game state for change detection."""
 
@@ -216,6 +259,7 @@ class _GameState:
         self._enabled_override: bool = True
         self._allowed_subjects: dict[str, str] = {}  # subject → role; empty = allow all
         self._subject_fps: dict[str, tuple[str, str]] = {}  # subject → (fingerprint, role)
+        self._config_received: bool = False
 
 
 def _handle_config(payload: bytes | bytearray, state: _GameState) -> None:
@@ -239,6 +283,7 @@ def _handle_config(payload: bytes | bytearray, state: _GameState) -> None:
             }
         else:
             state._allowed_subjects = {}
+    state._config_received = True
 
 
 def _subject_from_payload(payload: bytes | bytearray) -> str:

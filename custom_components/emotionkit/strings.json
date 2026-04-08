@@ -11,12 +11,20 @@
       "claim": {
         "title": "Claim-Code eingeben",
         "description": "Gib diesen Code in der EmotionKit Web-Oberfläche ein, um das Gerät zu registrieren:\n\n**{claim_code}**\n\nÖffne https://emotionkit.de und gib den Code dort ein. Klicke dann auf Absenden, sobald du den Code eingegeben hast."
+      },
+      "reconfigure": {
+        "title": "MQTT-Broker konfigurieren",
+        "description": "Gib die Adresse des EmotionKit MQTT-Brokers ein.",
+        "data": {
+          "mqtt_broker": "MQTT-Broker URL"
+        }
       }
     },
     "error": {
       "cannot_connect": "Verbindung zum EmotionKit-Server fehlgeschlagen.",
       "claim_timeout": "Zeitüberschreitung — der Code wurde nicht rechtzeitig eingegeben. Bitte erneut versuchen.",
-      "claim_failed": "Registrierung fehlgeschlagen. Der Code ist möglicherweise abgelaufen."
+      "claim_failed": "Registrierung fehlgeschlagen. Der Code ist möglicherweise abgelaufen.",
+      "invalid_broker": "Bitte eine gültige Broker-URL eingeben (z.B. tcp://host:1883 oder tls://host:8883)."
     },
     "abort": {
       "already_configured": "Dieses Gerät ist bereits konfiguriert."

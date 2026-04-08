@@ -105,7 +105,7 @@ class EmotionKitConfigFlow(ConfigFlow, domain=DOMAIN):
                     "device_id": credentials["device_id"],
                     "mqtt_username": credentials["mqtt_username"],
                     "mqtt_password": credentials["mqtt_password"],
-                    "mqtt_broker": credentials["mqtt_broker"],
+                    "mqtt_broker": credentials.get("mqtt_broker", ""),
                 },
             )
 
@@ -114,6 +114,35 @@ class EmotionKitConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="claim",
             data_schema=vol.Schema({}),
             description_placeholders={"claim_code": self._claim_code},
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Allow reconfiguring the MQTT broker URL."""
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        current_broker = entry.data.get("mqtt_broker", "") if entry else ""
+
+        if user_input is not None:
+            new_broker = user_input.get("mqtt_broker", "").strip()
+            if not new_broker:
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=vol.Schema(
+                        {vol.Required("mqtt_broker", default=current_broker): str}
+                    ),
+                    errors={"base": "invalid_broker"},
+                )
+            return self.async_update_reload_and_abort(
+                entry,
+                data={**entry.data, "mqtt_broker": new_broker},
+            )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {vol.Required("mqtt_broker", default=current_broker): str}
+            ),
         )
 
     # --- HTTP helpers ---
