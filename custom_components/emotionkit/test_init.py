@@ -76,3 +76,10 @@ def test_handle_config_accepts_legacy_allowed_subjects_list() -> None:
 def test_game_state_allows_events_without_config() -> None:
     state = _GameState()
     assert state._config_received
+
+
+def test_idle_event_is_configurable() -> None:
+    from .const import DEFAULT_IDLE_TIMEOUT, EVENT_IDLE, ALL_EVENT_TYPES
+
+    assert DEFAULT_IDLE_TIMEOUT == 30
+    assert EVENT_IDLE in ALL_EVENT_TYPES

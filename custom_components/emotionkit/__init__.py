@@ -14,15 +14,18 @@ import aiomqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.event import CALLBACK_TYPE, async_call_later
 
 from .const import (
     DEFAULT_CONTROL_PLANE_URL,
+    DEFAULT_IDLE_TIMEOUT,
     DEVICE_KIND,
     DOMAIN,
     EVENT_BOMB_DEFUSED,
     EVENT_BOMB_EXPLODED,
     EVENT_BOMB_PLANTED,
     EVENT_EMOTIONKIT,
+    EVENT_IDLE,
     EVENT_FREEZETIME,
     EVENT_ROUND_LIVE,
     EVENT_ROUND_OVER_CT,
@@ -50,6 +53,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     control_plane_url: str = entry.data.get(
         "control_plane_url", DEFAULT_CONTROL_PLANE_URL
     )
+    idle_timeout: int = entry.options.get("idle_timeout", DEFAULT_IDLE_TIMEOUT)
 
     # Resolve broker URL if missing from stored config (legacy installs).
     if not mqtt_broker:
@@ -65,6 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         port,
         use_tls,
     )
+    _LOGGER.info("EmotionKit idle timeout set to %s seconds", idle_timeout)
 
     # Register device in HA device registry.
     dev_reg = dr.async_get(hass)
@@ -82,6 +87,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # State tracking for event deduplication.
     state = _GameState()
     enabled = True
+    idle_handle: CALLBACK_TYPE | None = None
+    last_event_type = ""
+    last_event_at = ""
+
+    def _cancel_idle_timer() -> None:
+        nonlocal idle_handle
+        if idle_handle is not None:
+            idle_handle()
+            idle_handle = None
+
+    def _schedule_idle_timer() -> None:
+        nonlocal idle_handle
+        if idle_timeout <= 0:
+            return
+        _cancel_idle_timer()
+        idle_handle = async_call_later(hass, idle_timeout, _fire_idle)
+
+    def _fire_idle(_: object) -> None:
+        nonlocal idle_handle
+        idle_handle = None
+        _LOGGER.info(
+            "EmotionKit idle state reached after %s seconds", idle_timeout
+        )
+        hass.bus.async_fire(
+            EVENT_EMOTIONKIT,
+            {
+                "device_id": device_entry.id,
+                "type": EVENT_IDLE,
+                "timeout": idle_timeout,
+                "last_event_type": last_event_type,
+                "last_event_at": last_event_at,
+            },
+        )
 
     lwt_payload = json.dumps(
         {"name": device_name, "kind": DEVICE_KIND, "online": False}
@@ -169,6 +207,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                                 continue
 
                         events = _extract_events(message.payload, state)
+                        if events:
+                            last_event_type, last_event_data = events[-1]
+                            last_event_at = last_event_data.get("occurred_at", "")
+                            _schedule_idle_timer()
+
                         for event_type, event_data in events:
                             hass.bus.async_fire(
                                 EVENT_EMOTIONKIT,
@@ -192,7 +235,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 return
 
     task = hass.async_create_background_task(_mqtt_loop(), f"emotionkit_mqtt_{entry.entry_id}")
-    hass.data[DOMAIN][entry.entry_id] = {"task": task}
+    hass.data[DOMAIN][entry.entry_id] = {
+        "task": task,
+        "cancel_idle_timer": _cancel_idle_timer,
+    }
 
     return True
 
@@ -200,12 +246,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     data = hass.data[DOMAIN].pop(entry.entry_id, None)
-    if data and "task" in data:
-        data["task"].cancel()
-        try:
-            await data["task"]
-        except asyncio.CancelledError:
-            pass
+    if data:
+        if "cancel_idle_timer" in data and data["cancel_idle_timer"] is not None:
+            data["cancel_idle_timer"]()
+        if "task" in data:
+            data["task"].cancel()
+            try:
+                await data["task"]
+            except asyncio.CancelledError:
+                pass
     return True
 
 

@@ -4,6 +4,7 @@ DOMAIN = "emotionkit"
 
 DEFAULT_CONTROL_PLANE_URL = "https://emotionkit.de"
 DEFAULT_DEVICE_NAME = "Home Assistant"
+DEFAULT_IDLE_TIMEOUT = 30
 DEVICE_KIND = "ha-integration"
 
 # Claim code alphabet (matches Go bootstrap: no 0, O, I, 1).
@@ -20,6 +21,7 @@ TOPIC_CONFIG = "devices/{}/config"
 
 # Event fired on the HA bus.
 EVENT_EMOTIONKIT = "emotionkit_event"
+EVENT_IDLE = "idle"
 
 # Game event types derived from CS2 GSI payload.
 EVENT_BOMB_PLANTED = "bomb_planted"
@@ -38,4 +40,5 @@ ALL_EVENT_TYPES = [
     EVENT_ROUND_OVER_T,
     EVENT_ROUND_OVER_CT,
     EVENT_FREEZETIME,
+    EVENT_IDLE,
 ]

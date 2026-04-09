@@ -10,13 +10,15 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import callback
 
 from .const import (
     CLAIM_CODE_ALPHABET,
     CLAIM_CODE_LENGTH,
     DEFAULT_CONTROL_PLANE_URL,
     DEFAULT_DEVICE_NAME,
+    DEFAULT_IDLE_TIMEOUT,
     DEVICE_KIND,
     DOMAIN,
     POLL_INTERVAL,
@@ -38,10 +40,42 @@ def _generate_claim_code() -> str:
     return "".join(chars[:4]) + "-" + "".join(chars[4:])
 
 
+class EmotionKitOptionsFlow(OptionsFlow):
+    """Handle options flow for EmotionKit."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        "idle_timeout",
+                        default=self.config_entry.options.get(
+                            "idle_timeout", DEFAULT_IDLE_TIMEOUT
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0))
+                }
+            ),
+        )
+
+
 class EmotionKitConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for EmotionKit."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        return EmotionKitOptionsFlow(config_entry)
 
     def __init__(self) -> None:
         """Initialize."""
