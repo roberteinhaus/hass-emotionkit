@@ -58,6 +58,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Parse broker URL (tcp://host:port or tls://host:port).
     host, port, use_tls = _parse_broker_url(mqtt_broker)
+    _LOGGER.info(
+        "EmotionKit MQTT broker configured as %s (host=%s port=%s tls=%s)",
+        mqtt_broker,
+        host,
+        port,
+        use_tls,
+    )
 
     # Register device in HA device registry.
     dev_reg = dr.async_get(hass)
@@ -142,9 +149,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         # Each subject's latest match_fingerprint is tracked.
                         # The active match is determined by role priority:
                         # owner > admin majority > user majority.
-                        if not state._config_received:
-                            _LOGGER.debug("Skipping event until config is received")
-                            continue
 
                         if state._allowed_subjects:
                             subject = _subject_from_payload(message.payload)
@@ -178,7 +182,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             except aiomqtt.MqttError as err:
                 _LOGGER.warning(
-                    "MQTT connection lost (%s), reconnecting in 5s", err
+                    "MQTT connection lost (%s) [%s], reconnecting in 5s",
+                    err,
+                    type(err).__name__,
                 )
                 await asyncio.sleep(5)
             except asyncio.CancelledError:
@@ -259,7 +265,7 @@ class _GameState:
         self._enabled_override: bool = True
         self._allowed_subjects: dict[str, str] = {}  # subject → role; empty = allow all
         self._subject_fps: dict[str, tuple[str, str]] = {}  # subject → (fingerprint, role)
-        self._config_received: bool = False
+        self._config_received: bool = True
 
 
 def _handle_config(payload: bytes | bytearray, state: _GameState) -> None:

@@ -71,3 +71,8 @@ def test_handle_config_accepts_legacy_allowed_subjects_list() -> None:
         "steam:player1": "user",
         "steam:player2": "user",
     }
+
+
+def test_game_state_allows_events_without_config() -> None:
+    state = _GameState()
+    assert state._config_received
