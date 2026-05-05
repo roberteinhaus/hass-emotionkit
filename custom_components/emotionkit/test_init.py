@@ -73,9 +73,9 @@ def test_handle_config_accepts_legacy_allowed_subjects_list() -> None:
     }
 
 
-def test_game_state_allows_events_without_config() -> None:
+def test_game_state_requires_config_before_events() -> None:
     state = _GameState()
-    assert state._config_received
+    assert not state._config_received
 
 
 def test_idle_event_is_configurable() -> None:
