@@ -183,36 +183,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         if not enabled:
                             continue
 
-                        # Fail closed until retained device config was received.
-                        if not state._config_received:
-                            continue
+                        # If allowed_subjects is configured, apply strict subject
+                        # + fingerprint filtering. Without a configured allow-list
+                        # the device is unconfigured and falls back to old behaviour
+                        # (allow all events — same as before the feature existed).
+                        if state._allowed_subjects:
+                            subject = _subject_from_payload(message.payload)
+                            fp = _fingerprint_from_payload(message.payload)
+                            role = state._allowed_subjects.get(subject, "")
 
-                        # Empty allow-list means no subject is authorized.
-                        if not state._allowed_subjects:
-                            continue
+                            # Unknown subjects are never allowed.
+                            if not role:
+                                continue
 
-                        # Filter by allowed subjects using match fingerprints.
-                        # Each subject's latest match_fingerprint is tracked.
-                        # The active match is determined by role priority:
-                        # owner > admin majority > user majority.
+                            # Track fingerprint for known subjects.
+                            if fp:
+                                state._subject_fps[subject] = (fp, role)
 
-                        subject = _subject_from_payload(message.payload)
-                        fp = _fingerprint_from_payload(message.payload)
-                        role = state._allowed_subjects.get(subject, "")
+                            # Determine active fingerprint via priority.
+                            active_fp = _active_fingerprint(state._subject_fps)
 
-                        # Unknown subjects are never allowed.
-                        if not role:
-                            continue
-
-                        # Track fingerprint for known subjects.
-                        if fp:
-                            state._subject_fps[subject] = (fp, role)
-
-                        # Determine active fingerprint via priority.
-                        active_fp = _active_fingerprint(state._subject_fps)
-
-                        if active_fp and fp and fp != active_fp:
-                            continue
+                            if active_fp and fp and fp != active_fp:
+                                continue
 
                         events = _extract_events(message.payload, state)
                         if events:

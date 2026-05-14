@@ -73,7 +73,7 @@ def test_handle_config_accepts_legacy_allowed_subjects_list() -> None:
     }
 
 
-def test_game_state_requires_config_before_events() -> None:
+def test_game_state_config_received_starts_false() -> None:
     state = _GameState()
     assert not state._config_received
 
