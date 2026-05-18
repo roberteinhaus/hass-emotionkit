@@ -7,6 +7,6 @@
   "integration_type": "service",
   "iot_class": "cloud_push",
   "issue_tracker": "https://gitlab.com/emotionkit/emotionkit-cloud/-/issues",
-  "requirements": ["aiomqtt>=2.3.0"],
+  "requirements": ["aiomqtt>=2.5.1"],
   "version": "1.1.0"
 }

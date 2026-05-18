@@ -6,15 +6,21 @@ import asyncio
 import json
 import logging
 import ssl
+from typing import TYPE_CHECKING, Callable
 from urllib.parse import urlparse
 
 import aiohttp
-import aiomqtt
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.event import CALLBACK_TYPE, async_call_later
+try:
+    import aiomqtt
+except ModuleNotFoundError:  # pragma: no cover - used in unit-test environments
+    aiomqtt = None
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+
+CALLBACK_TYPE = Callable[[], None]
 
 from .const import (
     DEFAULT_CONTROL_PLANE_URL,
@@ -41,8 +47,65 @@ _LOGGER = logging.getLogger(__name__)
 _ROLE_PRIORITY = {"owner": 3, "admin": 2, "user": 1}
 
 
+def _build_status_payload(device_name: str, state: "_GameState", idle_timeout: int) -> str:
+    """Build the retained device status payload for control-plane discovery."""
+    return json.dumps(
+        {
+            "schema_version": "1.0",
+            "name": device_name,
+            "kind": DEVICE_KIND,
+            "online": True,
+            "config": {
+                "actor_name": device_name,
+                "enabled": state._enabled_override,
+                "idle_timeout_s": idle_timeout,
+                "allowed_subjects": state._allowed_subjects,
+            },
+            "config_schema": [
+                {
+                    "key": "actor_name",
+                    "label": "Name",
+                    "type": "string",
+                    "required": True,
+                    "max_length": 64,
+                    "group": "general",
+                },
+                {
+                    "key": "enabled",
+                    "label": "Enabled",
+                    "type": "bool",
+                    "required": True,
+                    "group": "general",
+                },
+                {
+                    "key": "idle_timeout_s",
+                    "label": "Idle timeout (s)",
+                    "type": "number",
+                    "required": True,
+                    "min": 0,
+                    "max": 3600,
+                    "group": "general",
+                },
+            ],
+            "capabilities": {
+                "intent_types": ["event-mapping", "ha-trigger"],
+                "supports_idle": True,
+                "supports_state_restore": False,
+                "supports_ack": False,
+                "protocol_version": "1.0",
+            },
+        }
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up EmotionKit from a config entry."""
+    if aiomqtt is None:
+        raise RuntimeError("aiomqtt is required to run the EmotionKit integration")
+
+    from homeassistant.helpers import device_registry as dr
+    from homeassistant.helpers.event import async_call_later
+
     hass.data.setdefault(DOMAIN, {})
 
     mqtt_username: str = entry.data["mqtt_username"]
@@ -82,6 +145,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     status_topic = TOPIC_STATUS.format(mqtt_username)
+    event_topic = TOPIC_EVENTS.format(mqtt_username)
     config_topic = TOPIC_CONFIG.format(mqtt_username)
 
     # State tracking for event deduplication.
@@ -125,18 +189,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         {"name": device_name, "kind": DEVICE_KIND, "online": False}
     )
 
-    status_payload = json.dumps(
-        {
-            "name": device_name,
-            "kind": DEVICE_KIND,
-            "online": True,
-            "config": {"actor_name": device_name, "enabled": state._enabled_override},
-            "config_schema": [
-                {"key": "actor_name", "label": "Name", "type": "string"},
-            ],
-        }
-    )
-
     async def _mqtt_loop() -> None:
         """Main MQTT loop with auto-reconnect."""
         nonlocal enabled
@@ -159,15 +211,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     _LOGGER.info("Connected to EmotionKit MQTT broker %s:%s", host, port)
 
                     # Publish online status (retained).
+                    status_payload = _build_status_payload(
+                        device_name, state, idle_timeout
+                    )
                     await client.publish(
                         status_topic, status_payload, qos=1, retain=True
                     )
 
                     # Subscribe to game events and config updates.
-                    await client.subscribe(TOPIC_EVENTS, qos=1)
+                    await client.subscribe(event_topic, qos=1)
                     await client.subscribe(config_topic, qos=1)
                     _LOGGER.debug(
-                        "Subscribed to %s and %s", TOPIC_EVENTS, config_topic
+                        "Subscribed to %s and %s", event_topic, config_topic
                     )
 
                     async for message in client.messages:
@@ -177,34 +232,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             _handle_config(message.payload, state)
                             if hasattr(state, "_enabled_override"):
                                 enabled = state._enabled_override
+                            status_payload = _build_status_payload(
+                                device_name, state, idle_timeout
+                            )
+                            await client.publish(
+                                status_topic, status_payload, qos=1, retain=True
+                            )
                             continue
 
-                        # Must be a team/+/events topic.
                         if not enabled:
                             continue
-
-                        # If allowed_subjects is configured, apply strict subject
-                        # + fingerprint filtering. Without a configured allow-list
-                        # the device is unconfigured and falls back to old behaviour
-                        # (allow all events — same as before the feature existed).
-                        if state._allowed_subjects:
-                            subject = _subject_from_payload(message.payload)
-                            fp = _fingerprint_from_payload(message.payload)
-                            role = state._allowed_subjects.get(subject, "")
-
-                            # Unknown subjects are never allowed.
-                            if not role:
-                                continue
-
-                            # Track fingerprint for known subjects.
-                            if fp:
-                                state._subject_fps[subject] = (fp, role)
-
-                            # Determine active fingerprint via priority.
-                            active_fp = _active_fingerprint(state._subject_fps)
-
-                            if active_fp and fp and fp != active_fp:
-                                continue
 
                         events = _extract_events(message.payload, state)
                         if events:

@@ -15,7 +15,7 @@ POLL_INTERVAL = 5  # seconds
 POLL_TIMEOUT = 300  # seconds (5 minutes max wait)
 
 # MQTT topics (formatted with mqtt_username).
-TOPIC_EVENTS = "team/+/events"
+TOPIC_EVENTS = "devices/{}/events"
 TOPIC_STATUS = "devices/{}/status"
 TOPIC_CONFIG = "devices/{}/config"
 
