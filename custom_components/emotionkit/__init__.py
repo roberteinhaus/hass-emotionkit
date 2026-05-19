@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import ssl
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 from urllib.parse import urlparse
 
@@ -42,6 +43,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+_MAX_EVENT_AGE_SECONDS = 5
 
 # Role-priority constants – owner trumps admin, admin trumps plain user.
 _ROLE_PRIORITY = {"owner": 3, "admin": 2, "user": 1}
@@ -454,6 +456,9 @@ def _extract_events(
     except (json.JSONDecodeError, TypeError):
         return []
 
+    if _is_stale_event(msg.get("occurred_at")):
+        return []
+
     round_data = (msg.get("payload") or {}).get("round") or {}
     bomb = round_data.get("bomb", "")
     phase = round_data.get("phase", "")
@@ -503,3 +508,20 @@ def _extract_events(
         state.bomb = ""
 
     return events
+
+
+def _is_stale_event(occurred_at: object) -> bool:
+    """Return True when occurred_at is older than the accepted freshness window."""
+    if not isinstance(occurred_at, str) or not occurred_at:
+        return False
+
+    try:
+        ts = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+
+    age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+    return age_seconds > _MAX_EVENT_AGE_SECONDS

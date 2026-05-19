@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import types
+from datetime import datetime, timedelta, timezone
 
 
 def _install_test_stubs() -> None:
@@ -59,6 +60,7 @@ _install_test_stubs()
 from .__init__ import (
     _GameState,
     _build_status_payload,
+    _extract_events,
     _handle_config,
     _parse_broker_url,
     _derive_broker_url,
@@ -177,3 +179,31 @@ def test_build_status_payload_reflects_disabled_state() -> None:
 
     assert payload["config"]["enabled"] is False
     assert payload["config"]["idle_timeout_s"] == 0
+
+
+def test_extract_events_ignores_stale_event() -> None:
+    state = _GameState()
+    occurred_at = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
+    payload = json.dumps(
+        {
+            "occurred_at": occurred_at,
+            "payload": {"round": {"phase": "live"}},
+        }
+    ).encode()
+
+    events = _extract_events(payload, state)
+    assert events == []
+
+
+def test_extract_events_processes_fresh_event() -> None:
+    state = _GameState()
+    occurred_at = datetime.now(timezone.utc).isoformat()
+    payload = json.dumps(
+        {
+            "occurred_at": occurred_at,
+            "payload": {"round": {"phase": "live"}},
+        }
+    ).encode()
+
+    events = _extract_events(payload, state)
+    assert len(events) == 1
