@@ -43,7 +43,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-_MAX_EVENT_AGE_SECONDS = 5
+_MAX_EVENT_AGE_SECONDS = 20
 
 # Role-priority constants – owner trumps admin, admin trumps plain user.
 _ROLE_PRIORITY = {"owner": 3, "admin": 2, "user": 1}

@@ -183,7 +183,7 @@ def test_build_status_payload_reflects_disabled_state() -> None:
 
 def test_extract_events_ignores_stale_event() -> None:
     state = _GameState()
-    occurred_at = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
+    occurred_at = (datetime.now(timezone.utc) - timedelta(seconds=40)).isoformat()
     payload = json.dumps(
         {
             "occurred_at": occurred_at,
