@@ -1,0 +1,13 @@
+# Test dependencies for the tests against the real Home Assistant core.
+# Needs Python 3.14.2 or newer (requirement of Home Assistant itself).
+#
+# pytest-homeassistant-custom-component bundles Home Assistant's own test
+# fixtures and pins the matching core version, pytest and its plugins.
+# 0.13.375 (2026-10-25) is the newest release and pins homeassistant==2026.10.4.
+# There is no release for Home Assistant 2026.11 yet; when one appears, raise
+# the pin (each release names its core version in its metadata and README).
+pytest-homeassistant-custom-component==0.13.375
+
+# The integration's own requirement (manifest.json). Home Assistant does not
+# install integration requirements in tests.
+aiomqtt>=2.5.1,<3

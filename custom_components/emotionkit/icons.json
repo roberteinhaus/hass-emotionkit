@@ -1,0 +1,49 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "bomb_planted": {
+        "default": "mdi:bomb-off",
+        "state": {
+          "on": "mdi:bomb"
+        }
+      },
+      "in_match": {
+        "default": "mdi:controller-off",
+        "state": {
+          "on": "mdi:controller"
+        }
+      }
+    },
+    "sensor": {
+      "round_phase": {
+        "default": "mdi:timer-outline"
+      },
+      "map": {
+        "default": "mdi:map"
+      },
+      "score_ct": {
+        "default": "mdi:shield-account"
+      },
+      "score_t": {
+        "default": "mdi:target-account"
+      },
+      "round": {
+        "default": "mdi:counter"
+      },
+      "health": {
+        "default": "mdi:heart-pulse"
+      },
+      "armor": {
+        "default": "mdi:shield-half-full"
+      },
+      "money": {
+        "default": "mdi:currency-usd"
+      }
+    },
+    "event": {
+      "game_event": {
+        "default": "mdi:pistol"
+      }
+    }
+  }
+}

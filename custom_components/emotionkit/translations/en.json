@@ -3,23 +3,69 @@
     "step": {
       "user": {
         "title": "Connect to EmotionKit",
-        "description": "The integration connects automatically to https://emotionkit.de. Enter a device name.",
+        "description": "The integration connects to https://emotionkit.de. Choose a name for this Home Assistant; you will get a claim code in the next step.",
         "data": {
           "device_name": "Device name"
+        },
+        "data_description": {
+          "device_name": "Shown in Home Assistant. The name you enter on the EmotionKit website when claiming the device replaces it."
         }
       },
       "claim": {
-        "title": "Enter claim code",
-        "description": "Enter this code in the EmotionKit web interface to register the device:\n\n**{claim_code}**\n\nOpen https://emotionkit.de and enter the code there. Then click submit once you have entered the code."
+        "title": "Enter the claim code"
+      },
+      "claim_failed": {
+        "title": "Registration not completed",
+        "description": "Submit to get a new claim code and try again."
+      },
+      "reauth_confirm": {
+        "title": "Claim the device again",
+        "description": "The EmotionKit server no longer accepts the credentials of this device. It was probably deleted in the EmotionKit web interface.\n\nSubmit to get a new claim code. Your automations and entities are kept."
+      },
+      "reconfigure": {
+        "title": "MQTT broker",
+        "description": "Change the address of the EmotionKit MQTT broker. Leave the field empty to use the address announced by the EmotionKit server.",
+        "data": {
+          "mqtt_broker": "MQTT broker URL"
+        },
+        "data_description": {
+          "mqtt_broker": "For example tcp://host:1883, tls://host:8883 or wss://host/mqtt."
+        }
       }
+    },
+    "progress": {
+      "wait_for_claim": "Open {url}, add a device and enter this code:\n\n**{claim_code}**\n\nThis dialog continues on its own as soon as the code has been entered. A code is valid for 15 minutes; after that a new one is shown here."
     },
     "error": {
       "cannot_connect": "Failed to connect to the EmotionKit server.",
-      "claim_timeout": "Timeout — the code was not entered in time. Please try again.",
-      "claim_failed": "Registration failed. The code may have expired."
+      "timeout_connect": "The EmotionKit server did not answer in time. Please try again.",
+      "server_busy": "The EmotionKit server is busy right now. Please try again in a minute.",
+      "invalid_response": "The EmotionKit server sent an unexpected answer.",
+      "claim_timeout": "The code was not entered in time.",
+      "claim_failed": "The registration failed.",
+      "invalid_broker": "Enter a valid broker URL, for example tcp://host:1883, tls://host:8883 or wss://host/mqtt.",
+      "unknown": "Unexpected error. See the Home Assistant log for details."
     },
     "abort": {
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured.",
+      "claim_failed": "The registration failed.",
+      "reauth_successful": "The device was claimed again and is connected with its new credentials.",
+      "reconfigure_successful": "The MQTT broker address was saved."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "EmotionKit options",
+        "data": {
+          "idle_timeout": "Idle timeout (seconds)",
+          "react_to_all_players": "React to all players"
+        },
+        "data_description": {
+          "idle_timeout": "The idle trigger fires when no game data has arrived for this long. 0 turns it off.",
+          "react_to_all_players": "Player triggers such as kill, death or flashed normally fire for the owner of the device only. Turn this on to react to every player who shares the device."
+        }
+      }
     }
   },
   "device_automation": {
@@ -28,9 +74,96 @@
       "bomb_defused": "Bomb defused",
       "bomb_exploded": "Bomb exploded",
       "round_live": "Round started",
-      "round_over_t": "Terrorists win",
-      "round_over_ct": "Counter-Terrorists win",
-      "freezetime": "Freeze time"
+      "round_over_t": "Terrorists win the round",
+      "round_over_ct": "Counter-Terrorists win the round",
+      "freezetime": "Freeze time started",
+      "match_start": "Match started",
+      "match_over": "Match over",
+      "match_won": "Match won",
+      "match_lost": "Match lost",
+      "halftime": "Halftime",
+      "player_kill": "Kill",
+      "player_headshot": "Headshot kill",
+      "ace": "Ace",
+      "player_death": "Death",
+      "player_flashed": "Flashed",
+      "player_low_health": "Low health",
+      "player_mvp": "MVP of the round",
+      "match_left": "Match left",
+      "idle": "No game activity (idle)"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "bomb_planted": {
+        "name": "Bomb planted"
+      },
+      "in_match": {
+        "name": "In match"
+      }
+    },
+    "sensor": {
+      "round_phase": {
+        "name": "Round phase",
+        "state": {
+          "freezetime": "Freeze time",
+          "live": "Live",
+          "over": "Over"
+        }
+      },
+      "map": {
+        "name": "Map"
+      },
+      "score_ct": {
+        "name": "Score CT"
+      },
+      "score_t": {
+        "name": "Score T"
+      },
+      "round": {
+        "name": "Round"
+      },
+      "health": {
+        "name": "Health"
+      },
+      "armor": {
+        "name": "Armor"
+      },
+      "money": {
+        "name": "Money"
+      }
+    },
+    "event": {
+      "game_event": {
+        "name": "Game event",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "bomb_planted": "Bomb planted",
+              "bomb_defused": "Bomb defused",
+              "bomb_exploded": "Bomb exploded",
+              "round_live": "Round started",
+              "round_over_t": "Terrorists win the round",
+              "round_over_ct": "Counter-Terrorists win the round",
+              "freezetime": "Freeze time started",
+              "match_start": "Match started",
+              "match_over": "Match over",
+              "match_won": "Match won",
+              "match_lost": "Match lost",
+              "halftime": "Halftime",
+              "player_kill": "Kill",
+              "player_headshot": "Headshot kill",
+              "ace": "Ace",
+              "player_death": "Death",
+              "player_flashed": "Flashed",
+              "player_low_health": "Low health",
+              "player_mvp": "MVP of the round",
+              "match_left": "Match left",
+              "idle": "No game activity (idle)"
+            }
+          }
+        }
+      }
     }
   }
 }

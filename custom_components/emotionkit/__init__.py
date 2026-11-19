@@ -1,527 +1,140 @@
-"""EmotionKit integration — CS2 game events for Home Assistant automations."""
+"""EmotionKit integration — CS2 game events for Home Assistant automations.
+
+The integration connects to the EmotionKit MQTT broker with the credentials
+obtained through the claim-code flow and exposes what happens in a match as
+device triggers and entities.
+
+Where things live:
+  coordinator.py   the runtime of a config entry (connection, timers, output)
+  connection.py    reconnect / back-off loop (plain asyncio)
+  engine.py        message processing; uses protocol.py, state.py,
+                   triggers.py and clock.py
+  broker.py        broker URL parsing
+  api.py           claim-code HTTP calls
+The modules of the last five lines do not import Home Assistant and are
+covered by the unit tests in tests/.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import ssl
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable
-from urllib.parse import urlparse
 
-import aiohttp
-
-try:
-    import aiomqtt
-except ModuleNotFoundError:  # pragma: no cover - used in unit-test environments
-    aiomqtt = None
-
-if TYPE_CHECKING:
-    from homeassistant.config_entries import ConfigEntry
-    from homeassistant.core import HomeAssistant
-
-CALLBACK_TYPE = Callable[[], None]
-
-from .const import (
-    DEFAULT_CONTROL_PLANE_URL,
-    DEFAULT_IDLE_TIMEOUT,
-    DEVICE_KIND,
-    DOMAIN,
-    EVENT_BOMB_DEFUSED,
-    EVENT_BOMB_EXPLODED,
-    EVENT_BOMB_PLANTED,
-    EVENT_EMOTIONKIT,
-    EVENT_IDLE,
-    EVENT_FREEZETIME,
-    EVENT_ROUND_LIVE,
-    EVENT_ROUND_OVER_CT,
-    EVENT_ROUND_OVER_T,
-    TOPIC_CONFIG,
-    TOPIC_EVENTS,
-    TOPIC_STATUS,
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
+from homeassistant.core import Event, HomeAssistant
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryError,
+    ConfigEntryNotReady,
 )
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .api import ApiError, async_fetch_broker_url
+from .broker import BrokerAddress, InvalidBrokerURL, derive_broker_url, parse_broker_url
+from .const import (
+    CONF_CONTROL_PLANE_URL,
+    CONF_DEVICE_ID,
+    CONF_MQTT_BROKER,
+    CONF_MQTT_BROKER_MANUAL,
+    CONF_MQTT_PASSWORD,
+    CONF_MQTT_USERNAME,
+    DEFAULT_CONTROL_PLANE_URL,
+    DOMAIN,
+)
+from .coordinator import EmotionKitConfigEntry, EmotionKitRuntime, device_name_of
 
 _LOGGER = logging.getLogger(__name__)
-_MAX_EVENT_AGE_SECONDS = 20
 
-# Role-priority constants – owner trumps admin, admin trumps plain user.
-_ROLE_PRIORITY = {"owner": 3, "admin": 2, "user": 1}
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.EVENT, Platform.SENSOR]
 
 
-def _build_status_payload(device_name: str, state: "_GameState", idle_timeout: int) -> str:
-    """Build the retained device status payload for control-plane discovery."""
-    return json.dumps(
-        {
-            "schema_version": "1.0",
-            "name": device_name,
-            "kind": DEVICE_KIND,
-            "online": True,
-            "config": {
-                "actor_name": device_name,
-                "enabled": state._enabled_override,
-                "idle_timeout_s": idle_timeout,
-                "allowed_subjects": state._allowed_subjects,
-            },
-            "config_schema": [
-                {
-                    "key": "actor_name",
-                    "label": "Name",
-                    "type": "string",
-                    "required": True,
-                    "max_length": 64,
-                    "group": "general",
-                },
-                {
-                    "key": "enabled",
-                    "label": "Enabled",
-                    "type": "bool",
-                    "required": True,
-                    "group": "general",
-                },
-                {
-                    "key": "idle_timeout_s",
-                    "label": "Idle timeout (s)",
-                    "type": "number",
-                    "required": True,
-                    "min": 0,
-                    "max": 3600,
-                    "group": "general",
-                },
-            ],
-            "capabilities": {
-                "intent_types": ["event-mapping", "ha-trigger"],
-                "supports_idle": True,
-                "supports_state_restore": False,
-                "supports_ack": False,
-                "protocol_version": "1.0",
-            },
-        }
-    )
+async def _async_server_broker_url(hass: HomeAssistant, control_plane_url: str) -> str:
+    """Ask the server for the broker URL (installations without a stored one)."""
+    try:
+        url = await async_fetch_broker_url(
+            async_get_clientsession(hass), control_plane_url
+        )
+    except ApiError as err:
+        raise ConfigEntryNotReady(
+            "Could not ask the EmotionKit server for the MQTT broker address"
+        ) from err
+    # A server that announces no broker runs it next to itself.
+    return url or derive_broker_url(control_plane_url)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up EmotionKit from a config entry."""
-    if aiomqtt is None:
-        raise RuntimeError("aiomqtt is required to run the EmotionKit integration")
-
-    from homeassistant.helpers import device_registry as dr
-    from homeassistant.helpers.event import async_call_later
-
-    hass.data.setdefault(DOMAIN, {})
-
-    mqtt_username: str = entry.data["mqtt_username"]
-    mqtt_password: str = entry.data["mqtt_password"]
-    mqtt_broker: str = entry.data.get("mqtt_broker", "")
-    device_name: str = entry.data.get("device_name", "EmotionKit")
-    device_id: str = entry.data["device_id"]
+async def _async_broker_address(
+    hass: HomeAssistant, entry: EmotionKitConfigEntry
+) -> BrokerAddress:
+    """Work out where to connect to."""
     control_plane_url: str = entry.data.get(
-        "control_plane_url", DEFAULT_CONTROL_PLANE_URL
+        CONF_CONTROL_PLANE_URL, DEFAULT_CONTROL_PLANE_URL
     )
-    idle_timeout: int = entry.options.get("idle_timeout", DEFAULT_IDLE_TIMEOUT)
+    stored: str = entry.data.get(CONF_MQTT_BROKER) or ""
 
-    # Resolve broker URL if missing from stored config (legacy installs).
-    if not mqtt_broker:
-        mqtt_broker = await _resolve_broker_url(control_plane_url)
-        _LOGGER.info("Resolved MQTT broker URL to %s", mqtt_broker)
+    if stored:
+        try:
+            return parse_broker_url(stored)
+        except InvalidBrokerURL as err:
+            if entry.data.get(CONF_MQTT_BROKER_MANUAL):
+                raise ConfigEntryError(
+                    f"Invalid MQTT broker URL: {err}. "
+                    "Use 'Reconfigure' to correct it."
+                ) from err
+            _LOGGER.warning(
+                "The stored MQTT broker URL is not usable (%s); "
+                "asking the EmotionKit server for the current one",
+                err,
+            )
 
-    # Parse broker URL (tcp://host:port or tls://host:port).
-    host, port, use_tls = _parse_broker_url(mqtt_broker)
-    _LOGGER.info(
-        "EmotionKit MQTT broker configured as %s (host=%s port=%s tls=%s)",
-        mqtt_broker,
-        host,
-        port,
-        use_tls,
-    )
-    _LOGGER.info("EmotionKit idle timeout set to %s seconds", idle_timeout)
+    try:
+        return parse_broker_url(await _async_server_broker_url(hass, control_plane_url))
+    except InvalidBrokerURL as err:
+        raise ConfigEntryError(
+            f"The EmotionKit server announced an unusable MQTT broker URL: {err}. "
+            "Use 'Reconfigure' to set one."
+        ) from err
 
-    # Register device in HA device registry.
-    dev_reg = dr.async_get(hass)
-    device_entry = dev_reg.async_get_or_create(
+
+async def async_setup_entry(hass: HomeAssistant, entry: EmotionKitConfigEntry) -> bool:
+    """Set up EmotionKit from a config entry."""
+    if not entry.data.get(CONF_MQTT_USERNAME) or not entry.data.get(CONF_MQTT_PASSWORD):
+        raise ConfigEntryAuthFailed("The MQTT credentials are missing")
+
+    address = await _async_broker_address(hass, entry)
+
+    # The identifier is the unique id of the config entry: it stays the same
+    # when the device is claimed again, so automations keep their device.
+    unique_id = entry.unique_id or entry.data.get(CONF_DEVICE_ID) or entry.entry_id
+    device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, device_id)},
-        name=device_name,
+        identifiers={(DOMAIN, unique_id)},
+        name=device_name_of(entry),
         manufacturer="EmotionKit",
         model="CS2 Game Events",
     )
 
-    status_topic = TOPIC_STATUS.format(mqtt_username)
-    event_topic = TOPIC_EVENTS.format(mqtt_username)
-    config_topic = TOPIC_CONFIG.format(mqtt_username)
+    runtime = EmotionKitRuntime(
+        hass, entry, address=address, device_id=device.id, unique_id=unique_id
+    )
+    entry.runtime_data = runtime
 
-    # State tracking for event deduplication.
-    state = _GameState()
-    enabled = True
-    idle_handle: CALLBACK_TYPE | None = None
-    last_event_type = ""
-    last_event_at = ""
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    def _cancel_idle_timer() -> None:
-        nonlocal idle_handle
-        if idle_handle is not None:
-            idle_handle()
-            idle_handle = None
+    async def _async_stop(_event: Event) -> None:
+        # Announce "offline" before Home Assistant goes down.
+        await runtime.async_stop()
 
-    def _schedule_idle_timer() -> None:
-        nonlocal idle_handle
-        if idle_timeout <= 0:
-            return
-        _cancel_idle_timer()
-        idle_handle = async_call_later(hass, idle_timeout, _fire_idle)
-
-    def _fire_idle(_: object) -> None:
-        nonlocal idle_handle
-        idle_handle = None
-        _LOGGER.info(
-            "EmotionKit idle state reached after %s seconds", idle_timeout
-        )
-        hass.bus.async_fire(
-            EVENT_EMOTIONKIT,
-            {
-                "device_id": device_entry.id,
-                "type": EVENT_IDLE,
-                "timeout": idle_timeout,
-                "last_event_type": last_event_type,
-                "last_event_at": last_event_at,
-            },
-        )
-
-    lwt_payload = json.dumps(
-        {"name": device_name, "kind": DEVICE_KIND, "online": False}
+    entry.async_on_unload(
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _async_stop)
     )
 
-    async def _mqtt_loop() -> None:
-        """Main MQTT loop with auto-reconnect."""
-        nonlocal enabled
-
-        tls_params = aiomqtt.TLSParameters(ssl.create_default_context()) if use_tls else None
-
-        while True:
-            try:
-                async with aiomqtt.Client(
-                    hostname=host,
-                    port=port,
-                    username=mqtt_username,
-                    password=mqtt_password,
-                    tls_params=tls_params,
-                    will=aiomqtt.Will(
-                        topic=status_topic, payload=lwt_payload, qos=1, retain=True
-                    ),
-                    keepalive=30,
-                ) as client:
-                    _LOGGER.info("Connected to EmotionKit MQTT broker %s:%s", host, port)
-
-                    # Publish online status (retained).
-                    status_payload = _build_status_payload(
-                        device_name, state, idle_timeout
-                    )
-                    await client.publish(
-                        status_topic, status_payload, qos=1, retain=True
-                    )
-
-                    # Subscribe to game events and config updates.
-                    await client.subscribe(event_topic, qos=1)
-                    await client.subscribe(config_topic, qos=1)
-                    _LOGGER.debug(
-                        "Subscribed to %s and %s", event_topic, config_topic
-                    )
-
-                    async for message in client.messages:
-                        topic = str(message.topic)
-
-                        if topic == config_topic:
-                            _handle_config(message.payload, state)
-                            if hasattr(state, "_enabled_override"):
-                                enabled = state._enabled_override
-                            status_payload = _build_status_payload(
-                                device_name, state, idle_timeout
-                            )
-                            await client.publish(
-                                status_topic, status_payload, qos=1, retain=True
-                            )
-                            continue
-
-                        if not enabled:
-                            continue
-
-                        events = _extract_events(message.payload, state)
-                        if events:
-                            last_event_type, last_event_data = events[-1]
-                            last_event_at = last_event_data.get("occurred_at", "")
-                            _schedule_idle_timer()
-
-                        for event_type, event_data in events:
-                            hass.bus.async_fire(
-                                EVENT_EMOTIONKIT,
-                                {
-                                    "device_id": device_entry.id,
-                                    "type": event_type,
-                                    **event_data,
-                                },
-                            )
-                            _LOGGER.debug("Fired %s: %s", EVENT_EMOTIONKIT, event_type)
-
-            except aiomqtt.MqttError as err:
-                _LOGGER.warning(
-                    "MQTT connection lost (%s) [%s], reconnecting in 5s",
-                    err,
-                    type(err).__name__,
-                )
-                await asyncio.sleep(5)
-            except asyncio.CancelledError:
-                _LOGGER.info("EmotionKit MQTT loop cancelled")
-                return
-
-    task = hass.async_create_background_task(_mqtt_loop(), f"emotionkit_mqtt_{entry.entry_id}")
-    hass.data[DOMAIN][entry.entry_id] = {
-        "task": task,
-        "cancel_idle_timer": _cancel_idle_timer,
-    }
-
+    runtime.async_start()
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: EmotionKitConfigEntry) -> bool:
     """Unload a config entry."""
-    data = hass.data[DOMAIN].pop(entry.entry_id, None)
-    if data:
-        if "cancel_idle_timer" in data and data["cancel_idle_timer"] is not None:
-            data["cancel_idle_timer"]()
-        if "task" in data:
-            data["task"].cancel()
-            try:
-                await data["task"]
-            except asyncio.CancelledError:
-                pass
-    return True
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _parse_broker_url(url: str) -> tuple[str, int, bool]:
-    """Parse a broker URL like 'tcp://host:1883' into (host, port, use_tls)."""
-    use_tls = url.startswith("tls://") or url.startswith("ssl://")
-    # Normalize scheme for urlparse.
-    normalized = url.replace("tcp://", "http://", 1).replace("tls://", "https://", 1).replace("ssl://", "https://", 1)
-    parsed = urlparse(normalized)
-    host = parsed.hostname or "localhost"
-    default_port = 8883 if use_tls else 1883
-    port = parsed.port or default_port
-    return host, port, use_tls
-
-
-async def _resolve_broker_url(control_plane_url: str) -> str:
-    """Fetch the MQTT broker URL from the control-plane, with fallback."""
-    info_url = f"{control_plane_url.rstrip('/')}/api/v1/info"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                info_url, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    broker = data.get("mqtt_broker_url", "")
-                    if broker:
-                        return broker
-    except Exception:  # noqa: BLE001
-        _LOGGER.debug("Could not fetch broker URL from %s", info_url)
-
-    # Fallback: derive from control-plane hostname.
-    return _derive_broker_url(control_plane_url)
-
-
-def _derive_broker_url(control_plane_url: str) -> str:
-    """Best-effort derivation of broker URL from the control-plane URL."""
-    parsed = urlparse(control_plane_url)
-    host = parsed.hostname or "localhost"
-    if parsed.scheme == "https":
-        return f"tls://{host}:8883"
-    return f"tcp://{host}:1883"
-
-
-class _GameState:
-    """Track last-known game state for change detection."""
-
-    def __init__(self) -> None:
-        self.bomb: str = ""
-        self.phase: str = ""
-        self.win_team: str = ""
-        self._enabled_override: bool = True
-        self._allowed_subjects: dict[str, str] = {}  # subject → role
-        self._subject_fps: dict[str, tuple[str, str]] = {}  # subject → (fingerprint, role)
-        self._config_received: bool = False
-
-
-def _handle_config(payload: bytes | bytearray, state: _GameState) -> None:
-    """Process a config update message."""
-    try:
-        data = json.loads(payload)
-    except (json.JSONDecodeError, TypeError):
-        return
-    if isinstance(data.get("enabled"), bool):
-        state._enabled_override = data["enabled"]
-    if "allowed_subjects" in data:
-        raw = data["allowed_subjects"]
-        if isinstance(raw, dict):
-            state._allowed_subjects = {
-                subj: role for subj, role in raw.items()
-                if isinstance(subj, str) and isinstance(role, str) and subj and role
-            }
-        elif isinstance(raw, list):
-            state._allowed_subjects = {
-                s: "user" for s in raw if isinstance(s, str) and s
-            }
-        else:
-            state._allowed_subjects = {}
-    state._config_received = True
-
-
-def _subject_from_payload(payload: bytes | bytearray) -> str:
-    """Extract the subject (Steam ID) from a game event payload."""
-    try:
-        msg = json.loads(payload)
-    except (json.JSONDecodeError, TypeError):
-        return ""
-    player_id = msg.get("player_id", "")
-    if not isinstance(player_id, str):
-        return ""
-    # player_id is "SteamID64:NNNNN" — extract the numeric part as subject.
-    if ":" in player_id:
-        return player_id.split(":", 1)[1]
-    return player_id
-
-
-def _fingerprint_from_payload(payload: bytes | bytearray) -> str:
-    """Extract the match_fingerprint from a game event payload."""
-    try:
-        msg = json.loads(payload)
-    except (json.JSONDecodeError, TypeError):
-        return ""
-    fp = msg.get("match_fingerprint", "")
-    return fp if isinstance(fp, str) else ""
-
-
-def _active_fingerprint(subject_fps: dict[str, tuple[str, str]]) -> str:
-    """Return the match fingerprint that should be followed based on role priority.
-
-    Owner > admin (majority) > user (majority).
-    """
-    owner_fp = ""
-    admin_counts: dict[str, int] = {}
-    user_counts: dict[str, int] = {}
-
-    for fp, role in subject_fps.values():
-        if role == "owner":
-            owner_fp = fp
-        elif role == "admin":
-            admin_counts[fp] = admin_counts.get(fp, 0) + 1
-        else:
-            user_counts[fp] = user_counts.get(fp, 0) + 1
-
-    if owner_fp:
-        return owner_fp
-
-    if admin_counts:
-        return max(admin_counts, key=admin_counts.get)  # type: ignore[arg-type]
-
-    if user_counts:
-        return max(user_counts, key=user_counts.get)  # type: ignore[arg-type]
-
-    return ""
-
-
-def _map_name_from_payload(payload: bytes | bytearray) -> str:
-    """Extract the map name (e.g. 'de_dust2') from a game event payload."""
-    try:
-        msg = json.loads(payload)
-    except (json.JSONDecodeError, TypeError):
-        return ""
-    map_block = msg.get("payload", {}).get("map")
-    if isinstance(map_block, dict):
-        name = map_block.get("name", "")
-        return name if isinstance(name, str) else ""
-    return ""
-
-
-def _extract_events(
-    payload: bytes | bytearray, state: _GameState
-) -> list[tuple[str, dict]]:
-    """Parse a game event message and return (event_type, data) tuples for changed states."""
-    try:
-        msg = json.loads(payload)
-    except (json.JSONDecodeError, TypeError):
-        return []
-
-    if _is_stale_event(msg.get("occurred_at")):
-        return []
-
-    round_data = (msg.get("payload") or {}).get("round") or {}
-    bomb = round_data.get("bomb", "")
-    phase = round_data.get("phase", "")
-    win_team = round_data.get("win_team", "")
-
-    base = {
-        "team_id": msg.get("team_id", ""),
-        "player_id": msg.get("player_id", ""),
-        "event_id": msg.get("id", ""),
-        "occurred_at": msg.get("occurred_at", ""),
-    }
-
-    events: list[tuple[str, dict]] = []
-
-    # Bomb state changes (highest priority).
-    if bomb and bomb != state.bomb:
-        mapping = {
-            "planted": EVENT_BOMB_PLANTED,
-            "defused": EVENT_BOMB_DEFUSED,
-            "exploded": EVENT_BOMB_EXPLODED,
-        }
-        if bomb in mapping:
-            events.append((mapping[bomb], base))
-
-    # Phase changes.
-    if phase and phase != state.phase:
-        if phase == "live":
-            events.append((EVENT_ROUND_LIVE, base))
-        elif phase == "freezetime":
-            events.append((EVENT_FREEZETIME, base))
-        elif phase == "over":
-            if win_team == "T":
-                events.append((EVENT_ROUND_OVER_T, base))
-            elif win_team == "CT":
-                events.append((EVENT_ROUND_OVER_CT, base))
-
-    # Update tracked state.
-    if bomb:
-        state.bomb = bomb
-    if phase:
-        state.phase = phase
-    if win_team:
-        state.win_team = win_team
-
-    # Reset bomb state on freezetime (new round).
-    if phase == "freezetime":
-        state.bomb = ""
-
-    return events
-
-
-def _is_stale_event(occurred_at: object) -> bool:
-    """Return True when occurred_at is older than the accepted freshness window."""
-    if not isinstance(occurred_at, str) or not occurred_at:
-        return False
-
-    try:
-        ts = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-
-    age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
-    return age_seconds > _MAX_EVENT_AGE_SECONDS
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        await entry.runtime_data.async_stop()
+    return unload_ok

@@ -3,23 +3,69 @@
     "step": {
       "user": {
         "title": "EmotionKit verbinden",
-        "description": "Die Integration verbindet sich automatisch mit https://emotionkit.de. Gib einen Gerätenamen ein.",
+        "description": "Die Integration verbindet sich mit https://emotionkit.de. Wähle einen Namen für dieses Home Assistant; im nächsten Schritt bekommst du einen Claim-Code.",
         "data": {
           "device_name": "Gerätename"
+        },
+        "data_description": {
+          "device_name": "Wird in Home Assistant angezeigt. Der Name, den du beim Registrieren auf der EmotionKit-Website eingibst, ersetzt ihn."
         }
       },
       "claim": {
-        "title": "Claim-Code eingeben",
-        "description": "Gib diesen Code in der EmotionKit Web-Oberfläche ein, um das Gerät zu registrieren:\n\n**{claim_code}**\n\nÖffne https://emotionkit.de und gib den Code dort ein. Klicke dann auf Absenden, sobald du den Code eingegeben hast."
+        "title": "Claim-Code eingeben"
+      },
+      "claim_failed": {
+        "title": "Registrierung nicht abgeschlossen",
+        "description": "Klicke auf Absenden, um einen neuen Claim-Code zu erhalten und es erneut zu versuchen."
+      },
+      "reauth_confirm": {
+        "title": "Gerät erneut registrieren",
+        "description": "Der EmotionKit-Server akzeptiert die Zugangsdaten dieses Geräts nicht mehr. Wahrscheinlich wurde es in der EmotionKit-Weboberfläche gelöscht.\n\nKlicke auf Absenden, um einen neuen Claim-Code zu erhalten. Deine Automationen und Entitäten bleiben erhalten."
+      },
+      "reconfigure": {
+        "title": "MQTT-Broker",
+        "description": "Ändere die Adresse des EmotionKit-MQTT-Brokers. Lass das Feld leer, um die vom EmotionKit-Server gemeldete Adresse zu verwenden.",
+        "data": {
+          "mqtt_broker": "MQTT-Broker-URL"
+        },
+        "data_description": {
+          "mqtt_broker": "Zum Beispiel tcp://host:1883, tls://host:8883 oder wss://host/mqtt."
+        }
       }
+    },
+    "progress": {
+      "wait_for_claim": "Öffne {url}, füge ein Gerät hinzu und gib diesen Code ein:\n\n**{claim_code}**\n\nDieser Dialog geht von selbst weiter, sobald der Code eingegeben wurde. Ein Code ist 15 Minuten gültig; danach wird hier ein neuer angezeigt."
     },
     "error": {
       "cannot_connect": "Verbindung zum EmotionKit-Server fehlgeschlagen.",
-      "claim_timeout": "Zeitüberschreitung — der Code wurde nicht rechtzeitig eingegeben. Bitte erneut versuchen.",
-      "claim_failed": "Registrierung fehlgeschlagen. Der Code ist möglicherweise abgelaufen."
+      "timeout_connect": "Der EmotionKit-Server hat nicht rechtzeitig geantwortet. Bitte versuche es erneut.",
+      "server_busy": "Der EmotionKit-Server ist gerade ausgelastet. Bitte versuche es in einer Minute erneut.",
+      "invalid_response": "Der EmotionKit-Server hat eine unerwartete Antwort gesendet.",
+      "claim_timeout": "Der Code wurde nicht rechtzeitig eingegeben.",
+      "claim_failed": "Die Registrierung ist fehlgeschlagen.",
+      "invalid_broker": "Gib eine gültige Broker-URL ein, zum Beispiel tcp://host:1883, tls://host:8883 oder wss://host/mqtt.",
+      "unknown": "Unerwarteter Fehler. Details stehen im Home-Assistant-Log."
     },
     "abort": {
-      "already_configured": "Dieses Gerät ist bereits konfiguriert."
+      "already_configured": "Dieses Gerät ist bereits konfiguriert.",
+      "claim_failed": "Die Registrierung ist fehlgeschlagen.",
+      "reauth_successful": "Das Gerät wurde erneut registriert und ist mit den neuen Zugangsdaten verbunden.",
+      "reconfigure_successful": "Die Adresse des MQTT-Brokers wurde gespeichert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "EmotionKit-Optionen",
+        "data": {
+          "idle_timeout": "Leerlauf-Timeout (Sekunden)",
+          "react_to_all_players": "Auf alle Spieler reagieren"
+        },
+        "data_description": {
+          "idle_timeout": "Der Leerlauf-Auslöser feuert, wenn so lange keine Spieldaten angekommen sind. 0 schaltet ihn ab.",
+          "react_to_all_players": "Spieler-Auslöser wie Kill, Tod oder Geblendet feuern normalerweise nur für den Besitzer des Geräts. Schalte dies ein, um auf alle Spieler zu reagieren, die das Gerät mitbenutzen."
+        }
+      }
     }
   },
   "device_automation": {
@@ -28,9 +74,96 @@
       "bomb_defused": "Bombe entschärft",
       "bomb_exploded": "Bombe explodiert",
       "round_live": "Runde gestartet",
-      "round_over_t": "Terroristen gewinnen",
-      "round_over_ct": "Counter-Terrorists gewinnen",
-      "freezetime": "Freezetime"
+      "round_over_t": "Terroristen gewinnen die Runde",
+      "round_over_ct": "Counter-Terrorists gewinnen die Runde",
+      "freezetime": "Freezetime beginnt",
+      "match_start": "Match gestartet",
+      "match_over": "Match beendet",
+      "match_won": "Match gewonnen",
+      "match_lost": "Match verloren",
+      "halftime": "Halbzeit",
+      "player_kill": "Kill",
+      "player_headshot": "Kopfschuss-Kill",
+      "ace": "Ace",
+      "player_death": "Tod",
+      "player_flashed": "Geblendet",
+      "player_low_health": "Wenig Leben",
+      "player_mvp": "MVP der Runde",
+      "match_left": "Match verlassen",
+      "idle": "Keine Spielaktivität (Leerlauf)"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "bomb_planted": {
+        "name": "Bombe gelegt"
+      },
+      "in_match": {
+        "name": "Im Match"
+      }
+    },
+    "sensor": {
+      "round_phase": {
+        "name": "Rundenphase",
+        "state": {
+          "freezetime": "Freezetime",
+          "live": "Läuft",
+          "over": "Beendet"
+        }
+      },
+      "map": {
+        "name": "Karte"
+      },
+      "score_ct": {
+        "name": "Punkte CT"
+      },
+      "score_t": {
+        "name": "Punkte T"
+      },
+      "round": {
+        "name": "Runde"
+      },
+      "health": {
+        "name": "Leben"
+      },
+      "armor": {
+        "name": "Rüstung"
+      },
+      "money": {
+        "name": "Geld"
+      }
+    },
+    "event": {
+      "game_event": {
+        "name": "Spielereignis",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "bomb_planted": "Bombe gelegt",
+              "bomb_defused": "Bombe entschärft",
+              "bomb_exploded": "Bombe explodiert",
+              "round_live": "Runde gestartet",
+              "round_over_t": "Terroristen gewinnen die Runde",
+              "round_over_ct": "Counter-Terrorists gewinnen die Runde",
+              "freezetime": "Freezetime beginnt",
+              "match_start": "Match gestartet",
+              "match_over": "Match beendet",
+              "match_won": "Match gewonnen",
+              "match_lost": "Match verloren",
+              "halftime": "Halbzeit",
+              "player_kill": "Kill",
+              "player_headshot": "Kopfschuss-Kill",
+              "ace": "Ace",
+              "player_death": "Tod",
+              "player_flashed": "Geblendet",
+              "player_low_health": "Wenig Leben",
+              "player_mvp": "MVP der Runde",
+              "match_left": "Match verlassen",
+              "idle": "Keine Spielaktivität (Leerlauf)"
+            }
+          }
+        }
+      }
     }
   }
 }

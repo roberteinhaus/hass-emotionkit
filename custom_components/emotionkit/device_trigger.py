@@ -1,4 +1,9 @@
-"""Device triggers for EmotionKit — CS2 game events as automation triggers."""
+"""Device triggers for EmotionKit — CS2 game events as automation triggers.
+
+Every trigger is an `emotionkit_event` on the Home Assistant bus, matched on
+the device and the trigger type. The labels shown in the automation editor
+come from the translations (device_automation.trigger_type).
+"""
 
 from __future__ import annotations
 
@@ -20,29 +25,15 @@ TRIGGER_SCHEMA = DEVICE_TRIGGER_BASE_SCHEMA.extend(
     {vol.Required(CONF_TYPE): vol.In(ALL_EVENT_TYPES)}
 )
 
-# Human-readable labels shown in the Automation editor.
-TRIGGER_TYPE_LABELS: dict[str, str] = {
-    "bomb_planted": "Bomb planted",
-    "bomb_defused": "Bomb defused",
-    "bomb_exploded": "Bomb exploded",
-    "round_live": "Round started (live)",
-    "round_over_t": "Round won by Terrorists",
-    "round_over_ct": "Round won by Counter-Terrorists",
-    "freezetime": "Freeze time",
-}
-
 
 async def async_get_triggers(
     hass: HomeAssistant, device_id: str
 ) -> list[dict[str, Any]]:
-    """Return a list of triggers for an EmotionKit device."""
-    device_reg = dr.async_get(hass)
-    device = device_reg.async_get(device_id)
+    """Return the triggers of an EmotionKit device."""
+    device = dr.async_get(hass).async_get(device_id)
     if device is None:
         return []
-
-    # Verify this device belongs to the emotionkit domain.
-    if not any(ident[0] == DOMAIN for ident in device.identifiers):
+    if not any(identifier[0] == DOMAIN for identifier in device.identifiers):
         return []
 
     return [
@@ -62,7 +53,7 @@ async def async_attach_trigger(
     action: TriggerActionType,
     trigger_info: TriggerInfo,
 ) -> CALLBACK_TYPE:
-    """Attach a trigger that fires on a specific EmotionKit event type."""
+    """Attach a trigger that fires on one EmotionKit event type."""
     event_config = event_trigger.TRIGGER_SCHEMA(
         {
             event_trigger.CONF_PLATFORM: "event",
