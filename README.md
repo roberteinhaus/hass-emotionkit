@@ -188,6 +188,26 @@ actions:
         {{ 'scene.gaming' if trigger.to_state.state == 'on' else 'scene.normal' }}
 ```
 
+## Vorlagen
+
+Für häufige Wünsche gibt es fertige Vorlagen (Blueprints). Du wählst nur noch Geräte und Farben aus; schreiben musst du nichts. Sie brauchen Home Assistant 2026.7 oder neuer.
+
+| Vorlage | Was sie tut |
+|---------|-------------|
+| `bombenlicht.yaml` | Lichter in einer Farbe, solange die Bombe liegt; andere Farbe beim Entschärfen, Blinken bei der Explosion. Danach kehren die Lichter in ihren vorherigen Zustand zurück. |
+| `signal_bei_ereignis.yaml` | Schaltet bei ausgewählten Ereignissen einen Schalter, ein Licht oder eine Sirene für einige Sekunden ein, zum Beispiel eine Signalleuchte bei der Explosion. |
+| `licht_nach_spielstand.yaml` | Färbt Lichter zu Beginn jeder Runde danach, wer führt. |
+| `musik_pausieren.yaml` | Pausiert laufende Musik, solange gespielt wird, und setzt sie danach fort. |
+| `sound_bei_ereignis.yaml` | Spielt bei ausgewählten Ereignissen eine Audiodatei auf einem Lautsprecher, auf Wunsch als Durchsage über laufender Musik. |
+
+Importieren: **Einstellungen → Automationen & Szenen → Vorlagen → Vorlage importieren** und die Adresse der Datei einfügen, zum Beispiel
+
+```
+https://github.com/roberteinhaus/hass-emotionkit/blob/main/blueprints/automation/emotionkit/bombenlicht.yaml
+```
+
+Die Vorlagen hören auf die Entität „Spielereignis" des EmotionKit-Geräts. Wer lieber selbst schreibt, findet unter [Automationen](#automationen) Beispiele.
+
 ## Problemlösung
 
 - **„Erneute Authentifizierung erforderlich“** — Der EmotionKit-Server akzeptiert die Zugangsdaten nicht mehr, meist weil das Gerät in der Weboberfläche gelöscht wurde. Folge dem Dialog: Du bekommst einen neuen Claim-Code. Gerät, Entitäten und Automationen in Home Assistant bleiben erhalten.

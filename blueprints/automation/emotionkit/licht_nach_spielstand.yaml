@@ -1,0 +1,120 @@
+blueprint:
+  name: "EmotionKit: Licht nach Spielstand"
+  description: >-
+    Färbt Lichter zu Beginn jeder Runde nach dem Spielstand: eine Farbe, wenn
+    die Terroristen führen, eine, wenn die Counter-Terrorists führen, und eine
+    bei Gleichstand.
+  domain: automation
+  author: EmotionKit
+  source_url: https://github.com/roberteinhaus/hass-emotionkit/blob/main/blueprints/automation/emotionkit/licht_nach_spielstand.yaml
+  homeassistant:
+    min_version: "2026.7.0"
+  input:
+    game:
+      name: Spiel
+      icon: mdi:controller
+      input:
+        game_event:
+          name: Spielereignis
+          description: Die Entität „Spielereignis" des EmotionKit-Geräts.
+          selector:
+            entity:
+              filter:
+                - integration: emotionkit
+                  domain: event
+        score_t:
+          name: Punkte T
+          selector:
+            entity:
+              filter:
+                - integration: emotionkit
+                  domain: sensor
+        score_ct:
+          name: Punkte CT
+          selector:
+            entity:
+              filter:
+                - integration: emotionkit
+                  domain: sensor
+    lamps:
+      name: Lichter
+      icon: mdi:lightbulb-group
+      input:
+        lights:
+          name: Lichter
+          selector:
+            target:
+              entity:
+                - domain: light
+    settings:
+      name: Farben
+      icon: mdi:palette
+      collapsed: true
+      input:
+        color_t:
+          name: Farbe, wenn die Terroristen führen
+          default: [255, 190, 0]
+          selector:
+            color_rgb: {}
+        color_ct:
+          name: Farbe, wenn die Counter-Terrorists führen
+          default: [0, 80, 255]
+          selector:
+            color_rgb: {}
+        color_tie:
+          name: Farbe bei Gleichstand
+          default: [0, 255, 0]
+          selector:
+            color_rgb: {}
+        brightness:
+          name: Helligkeit
+          default: 100
+          selector:
+            number:
+              min: 1
+              max: 100
+              unit_of_measurement: "%"
+              mode: slider
+
+mode: restart
+max_exceeded: silent
+
+triggers:
+  - trigger: event.received
+    target:
+      entity_id: !input game_event
+    options:
+      event_type:
+        - round_live
+
+actions:
+  - choose:
+      - alias: Terroristen führen
+        conditions:
+          - condition: numeric_state
+            entity_id: !input score_t
+            above: !input score_ct
+        sequence:
+          - action: light.turn_on
+            target: !input lights
+            data:
+              rgb_color: !input color_t
+              brightness_pct: !input brightness
+      - alias: Counter-Terrorists führen
+        conditions:
+          - condition: numeric_state
+            entity_id: !input score_ct
+            above: !input score_t
+        sequence:
+          - action: light.turn_on
+            target: !input lights
+            data:
+              rgb_color: !input color_ct
+              brightness_pct: !input brightness
+    default:
+      - alias: Gleichstand
+        action: light.turn_on
+        target: !input lights
+        data:
+          rgb_color: !input color_tie
+          brightness_pct: !input brightness

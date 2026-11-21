@@ -1,0 +1,113 @@
+blueprint:
+  name: "EmotionKit: Sound bei Ereignis"
+  description: >-
+    Spielt bei ausgewählten Spielereignissen eine Audiodatei auf einem
+    Lautsprecher ab, zum Beispiel einen Ansager zum Rundenstart. Als Durchsage
+    abgespielt, unterbricht der Sound laufende Musik nur kurz (wenn der Player
+    das unterstützt, etwa über Music Assistant). Für mehrere Sounds legst du
+    je eine Automation an.
+  domain: automation
+  author: EmotionKit
+  source_url: https://github.com/roberteinhaus/hass-emotionkit/blob/main/blueprints/automation/emotionkit/sound_bei_ereignis.yaml
+  homeassistant:
+    min_version: "2026.7.0"
+  input:
+    game_event:
+      name: Spielereignis
+      description: Die Entität „Spielereignis" des EmotionKit-Geräts.
+      selector:
+        entity:
+          filter:
+            - integration: emotionkit
+              domain: event
+    event_types:
+      name: Ereignisse
+      default:
+        - round_live
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Bombe gelegt
+              value: bomb_planted
+            - label: Bombe entschärft
+              value: bomb_defused
+            - label: Bombe explodiert
+              value: bomb_exploded
+            - label: Freezetime beginnt
+              value: freezetime
+            - label: Runde gestartet
+              value: round_live
+            - label: Terroristen gewinnen die Runde
+              value: round_over_t
+            - label: Counter-Terrorists gewinnen die Runde
+              value: round_over_ct
+            - label: Match gestartet
+              value: match_start
+            - label: Halbzeit
+              value: halftime
+            - label: Match beendet
+              value: match_over
+            - label: Match gewonnen
+              value: match_won
+            - label: Match verloren
+              value: match_lost
+            - label: Kill
+              value: player_kill
+            - label: Kopfschuss-Kill
+              value: player_headshot
+            - label: Ace
+              value: ace
+            - label: Tod
+              value: player_death
+            - label: Geblendet
+              value: player_flashed
+            - label: Wenig Leben
+              value: player_low_health
+            - label: MVP der Runde
+              value: player_mvp
+            - label: Match verlassen
+              value: match_left
+            - label: Keine Spielaktivität (Leerlauf)
+              value: idle
+    speaker:
+      name: Lautsprecher
+      selector:
+        entity:
+          filter:
+            - domain: media_player
+    media_id:
+      name: Audiodatei
+      description: >-
+        Adresse oder Medienquelle der Datei, zum Beispiel
+        media-source://media_source/local/emotionkit/fight.mp3 oder eine
+        http-Adresse.
+      selector:
+        text: {}
+    announce:
+      name: Als Durchsage abspielen
+      description: Laufende Musik wird danach fortgesetzt, sofern der Lautsprecher Durchsagen unterstützt.
+      default: true
+      selector:
+        boolean: {}
+
+# Sounds are played one after the other, never over each other.
+mode: queued
+max: 5
+max_exceeded: silent
+
+triggers:
+  - trigger: event.received
+    target:
+      entity_id: !input game_event
+    options:
+      event_type: !input event_types
+
+actions:
+  - action: media_player.play_media
+    target:
+      entity_id: !input speaker
+    data:
+      media_content_id: !input media_id
+      media_content_type: music
+      announce: !input announce

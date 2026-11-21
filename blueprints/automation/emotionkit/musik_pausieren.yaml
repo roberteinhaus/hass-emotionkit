@@ -1,0 +1,72 @@
+blueprint:
+  name: "EmotionKit: Musik pausieren, solange gespielt wird"
+  description: >-
+    Pausiert die laufende Musik, sobald ein Match beginnt, und setzt sie fort,
+    wenn eine Weile nicht mehr gespielt wird. Fortgesetzt werden nur die
+    Player, die beim Start des Matches liefen.
+  domain: automation
+  author: EmotionKit
+  source_url: https://github.com/roberteinhaus/hass-emotionkit/blob/main/blueprints/automation/emotionkit/musik_pausieren.yaml
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    in_match:
+      name: Im Match
+      description: Der Binärsensor „Im Match" des EmotionKit-Geräts.
+      selector:
+        entity:
+          filter:
+            - integration: emotionkit
+              domain: binary_sensor
+    players:
+      name: Medienplayer
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: media_player
+    resume_delay:
+      name: Wartezeit vor dem Fortsetzen
+      description: So lange darf nicht gespielt werden, bevor die Musik weiterläuft (überbrückt die Pause zwischen zwei Matches).
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 600
+          unit_of_measurement: s
+
+# One run lasts from the start of a match until the music resumes; a match
+# that begins during the waiting time keeps the same run going.
+mode: single
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    entity_id: !input in_match
+    from: "off"
+    to: "on"
+
+variables:
+  players: !input players
+  # The players that are playing right now; only these are resumed later.
+  playing: "{{ players | select('is_state', 'playing') | list }}"
+
+conditions:
+  - alias: Es läuft Musik
+    condition: template
+    value_template: "{{ playing | count > 0 }}"
+
+actions:
+  - action: media_player.media_pause
+    target:
+      entity_id: "{{ playing }}"
+  - alias: Warten, bis nicht mehr gespielt wird
+    wait_for_trigger:
+      - trigger: state
+        entity_id: !input in_match
+        to: "off"
+        for:
+          seconds: !input resume_delay
+  - action: media_player.media_play
+    target:
+      entity_id: "{{ playing }}"

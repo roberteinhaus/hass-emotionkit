@@ -1,0 +1,188 @@
+blueprint:
+  name: "EmotionKit: Bombenlicht"
+  description: >-
+    Färbt Lichter, solange in CS2 die Bombe liegt: eine Farbe beim Legen, eine
+    beim Entschärfen, Blinken bei der Explosion. Danach kehren die Lichter in
+    den Zustand zurück, den sie vorher hatten (auch „aus").
+  domain: automation
+  author: EmotionKit
+  source_url: https://github.com/roberteinhaus/hass-emotionkit/blob/main/blueprints/automation/emotionkit/bombenlicht.yaml
+  homeassistant:
+    min_version: "2026.7.0"
+  input:
+    game:
+      name: Spiel
+      icon: mdi:controller
+      input:
+        game_event:
+          name: Spielereignis
+          description: Die Entität „Spielereignis" des EmotionKit-Geräts.
+          selector:
+            entity:
+              filter:
+                - integration: emotionkit
+                  domain: event
+    lamps:
+      name: Lichter
+      icon: mdi:lightbulb-group
+      input:
+        lights:
+          name: Lichter
+          description: Farbige Lichter. Ihr Zustand wird gesichert, bevor sie eingefärbt werden.
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: light
+    settings:
+      name: Farben und Zeiten
+      icon: mdi:palette
+      collapsed: true
+      input:
+        color_planted:
+          name: Farbe „Bombe gelegt"
+          default: [255, 0, 0]
+          selector:
+            color_rgb: {}
+        color_defused:
+          name: Farbe „Bombe entschärft"
+          default: [0, 255, 0]
+          selector:
+            color_rgb: {}
+        color_exploded:
+          name: Zweite Farbe beim Blinken nach der Explosion
+          default: [255, 180, 0]
+          selector:
+            color_rgb: {}
+        brightness:
+          name: Helligkeit
+          default: 100
+          selector:
+            number:
+              min: 1
+              max: 100
+              unit_of_measurement: "%"
+              mode: slider
+        hold_seconds:
+          name: Anzeigedauer nach dem Entschärfen
+          default: 5
+          selector:
+            number:
+              min: 1
+              max: 60
+              unit_of_measurement: s
+        blink_count:
+          name: Anzahl der Blinker nach der Explosion
+          default: 8
+          selector:
+            number:
+              min: 1
+              max: 30
+        max_wait:
+          name: Längste Wartezeit auf das Ende der Bombe
+          description: Kommt in dieser Zeit kein weiteres Ereignis, werden die Lichter zurückgesetzt.
+          default: 60
+          selector:
+            number:
+              min: 30
+              max: 180
+              unit_of_measurement: s
+
+# One run covers one bomb; a new plant starts over.
+mode: restart
+max_exceeded: silent
+
+variables:
+  # A snapshot scene of its own for every automation built from this blueprint.
+  snapshot_scene: "emotionkit_bombenlicht_{{ this.entity_id.split('.')[1] }}"
+
+triggers:
+  - trigger: event.received
+    target:
+      entity_id: !input game_event
+    options:
+      event_type:
+        - bomb_planted
+
+actions:
+  - alias: Zustand der Lichter sichern
+    action: scene.create
+    data:
+      scene_id: "{{ snapshot_scene }}"
+      snapshot_entities: !input lights
+  - alias: Bombe gelegt
+    action: light.turn_on
+    target:
+      entity_id: !input lights
+    data:
+      rgb_color: !input color_planted
+      brightness_pct: !input brightness
+  - alias: Auf das Ende der Bombe warten
+    wait_for_trigger:
+      - trigger: event.received
+        id: defused
+        target:
+          entity_id: !input game_event
+        options:
+          event_type:
+            - bomb_defused
+      - trigger: event.received
+        id: exploded
+        target:
+          entity_id: !input game_event
+        options:
+          event_type:
+            - bomb_exploded
+      - trigger: event.received
+        id: ended
+        target:
+          entity_id: !input game_event
+        options:
+          event_type:
+            - freezetime
+            - match_over
+            - match_left
+            - idle
+    timeout:
+      seconds: !input max_wait
+    continue_on_timeout: true
+  - choose:
+      - alias: Entschärft
+        conditions: "{{ wait.trigger is not none and wait.trigger.id == 'defused' }}"
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id: !input lights
+            data:
+              rgb_color: !input color_defused
+              brightness_pct: !input brightness
+          - delay:
+              seconds: !input hold_seconds
+      - alias: Explodiert
+        conditions: "{{ wait.trigger is not none and wait.trigger.id == 'exploded' }}"
+        sequence:
+          - repeat:
+              count: !input blink_count
+              sequence:
+                - action: light.turn_on
+                  target:
+                    entity_id: !input lights
+                  data:
+                    rgb_color: !input color_exploded
+                    brightness_pct: !input brightness
+                    transition: 0
+                - delay:
+                    milliseconds: 150
+                - action: light.turn_on
+                  target:
+                    entity_id: !input lights
+                  data:
+                    rgb_color: !input color_planted
+                    brightness_pct: !input brightness
+                    transition: 0
+                - delay:
+                    milliseconds: 150
+  - alias: Lichter zurücksetzen
+    action: scene.turn_on
+    target:
+      entity_id: "{{ 'scene.' ~ snapshot_scene }}"
