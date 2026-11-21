@@ -36,7 +36,7 @@ Bringe CS2-Spielereignisse direkt in dein Smart Home. Die EmotionKit-Integration
 2. Suche nach **EmotionKit**
 3. Gib einen Gerätenamen ein
 4. Ein **Claim-Code** wird angezeigt (z. B. `ABCD-5HKL`)
-5. Öffne die EmotionKit-Weboberfläche unter https://emotionkit.de, füge ein Gerät hinzu und gib den Code dort ein
+5. Öffne die EmotionKit-Weboberfläche unter https://emotionkit.de, wähle auf der Seite **Geräte** „Gerät hinzufügen“ (das +) und gib den Code dort ein
 6. Der Dialog in Home Assistant geht von selbst weiter, sobald der Code eingegeben wurde
 
 Ein Code ist 15 Minuten gültig. Läuft er ab, zeigt der Dialog automatisch einen neuen an.
@@ -190,7 +190,7 @@ actions:
 
 ## Vorlagen
 
-Für häufige Wünsche gibt es fertige Vorlagen (Blueprints). Du wählst nur noch Geräte und Farben aus; schreiben musst du nichts. Sie brauchen Home Assistant 2026.7 oder neuer.
+Für häufige Wünsche gibt es fertige Vorlagen (Blueprints). Du wählst nur noch Geräte und Farben aus; schreiben musst du nichts. Sie brauchen Home Assistant 2026.7 oder neuer; nur `musik_pausieren.yaml` läuft schon ab 2024.10.
 
 | Vorlage | Was sie tut |
 |---------|-------------|
