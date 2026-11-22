@@ -77,6 +77,18 @@ class ParseEnvelopeTest(unittest.TestCase):
         self.assertEqual(env.map_name, "de_mirage")
         self.assertTrue(env.in_match)
         self.assertEqual(env.match_key, "d1k0")
+        self.assertFalse(env.mixed_sides)
+
+    def test_mixed_sides(self) -> None:
+        env = parse_envelope(raw({**envelope(), "mixed_sides": True}))
+        assert env is not None
+        self.assertTrue(env.mixed_sides)
+        # Only the JSON value true means yes.
+        for value in (False, None, "true", 1, "yes", [True]):
+            with self.subTest(value=value):
+                env = parse_envelope(raw({**envelope(), "mixed_sides": value}))
+                assert env is not None
+                self.assertFalse(env.mixed_sides)
 
     def test_accepts_bytes_bytearray_str_and_dict(self) -> None:
         message = envelope(event("round_live", round=1))

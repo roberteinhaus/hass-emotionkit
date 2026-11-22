@@ -140,6 +140,7 @@ class GameStateTracker:
         self._money: int | None = None
         self._sides: dict[str, str] = {}
         self._last_side = ""
+        self._mixed = False
         self._over = False
         self._once_at: dict[str, float] = {}
 
@@ -176,12 +177,26 @@ class GameStateTracker:
         self._clear_match()
         return changed
 
+    @property
+    def mixed_sides(self) -> bool:
+        """Return True while the device's players are opponents.
+
+        The server says so with every packet of the match: players who may
+        drive the device play against each other. The device then takes no
+        side.
+        """
+        return self._mixed
+
     def reference_side(self, owner: str | None, *, any_player: bool) -> str:
-        """Return the side a match result is judged from ("" if unknown).
+        """Return the side a match result is judged from ("" for none).
 
         That is the owner's side. Without a known owner, or when the device
         reacts to all players, the side of the player seen last is used.
+        While the device's players are opponents (`mixed_sides`) there is no
+        such side, whatever `owner` and `any_player` say.
         """
+        if self._mixed:
+            return ""
         if owner and owner in self._sides:
             return self._sides[owner]
         if owner is None or any_player:
@@ -229,6 +244,7 @@ class GameStateTracker:
             self._match_id = env.match_id or None
         gap = None if self._last_seen is None else now - self._last_seen
         self._last_seen = now
+        self._mixed = env.mixed_sides
 
         side = env.player_side.upper()
         if side in SIDES:

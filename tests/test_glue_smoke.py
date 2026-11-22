@@ -712,6 +712,20 @@ class DiagnosticsAndTriggersTest(GlueTestCase):
         self.assertEqual(data["runtime"]["config"]["allowed_subjects_by_role"], {"owner": 1, "user": 1})
         self.assertEqual(data["runtime"]["stats"]["triggers"], 1)
         self.assertEqual(data["runtime"]["broker"]["address"], "tcp://broker.example:1883")
+        self.assertIs(data["runtime"]["state"]["mixed_sides"], False)
+
+    async def test_diagnostics_report_mixed_sides(self) -> None:
+        entry, runtime, client = await self.start()
+        client.deliver(CONFIG_TOPIC, raw(OWNER_CONFIG), retain=True)
+        client.deliver(EVENT_TOPIC, raw(envelope(subject=OWNER, side="CT")))
+        planted = envelope(event("bomb_planted", round=1), subject=MATE, side="T", bomb="planted")
+        client.deliver(EVENT_TOPIC, raw({**planted, "mixed_sides": True}))
+        await eventually(lambda: self.fired("bomb_planted"))
+
+        data = await diagnostics.async_get_config_entry_diagnostics(self.hass, entry)
+        self.assertIs(data["runtime"]["state"]["mixed_sides"], True)
+        self.assertEqual(data["runtime"]["state"]["players_in_match"], 2)
+        json.dumps(data)
 
     async def test_diagnostics_of_an_entry_that_is_not_loaded(self) -> None:
         entry = stubs.FakeEntry(data=dict(ENTRY_DATA))

@@ -164,6 +164,9 @@ class Envelope:
     # occurred_at as epoch seconds (server clock), None if missing/invalid.
     occurred_ts: float | None = None
     match_id: str = ""
+    # True while players who may drive this device play against each other
+    # in the match. The server decides that; the device then takes no side.
+    mixed_sides: bool = False
     events: tuple[GameEvent, ...] = ()
     payload: Mapping[str, Any] = field(default_factory=dict)
 
@@ -259,6 +262,7 @@ def parse_envelope(raw: object) -> Envelope | None:
         occurred_at=occurred_at,
         occurred_ts=parse_timestamp(occurred_at),
         match_id=_text(data.get("match_id")) or _text(data.get("match_fingerprint")),
+        mixed_sides=data.get("mixed_sides") is True,
         events=tuple(events),
         payload=as_dict(data.get("payload")),
     )

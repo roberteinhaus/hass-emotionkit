@@ -19,6 +19,8 @@ Bringe CS2-Spielereignisse direkt in dein Smart Home. Die EmotionKit-Integration
 
 ### Über HACS (empfohlen)
 
+Ab Home Assistant 2026.11 ist HACS als „Marketplace“ fest eingebaut. Du findest ihn unter **Einstellungen** → **Marketplace** und fügst das Repository dort über „Add from link“ hinzu (so heißt der Punkt in der englischen Oberfläche). Der separate HACS-Installer funktioniert ab dieser Version nicht mehr. Die folgenden Schritte gelten für ältere Versionen:
+
 1. Öffne HACS in Home Assistant
 2. Klicke auf **⋮** → **Benutzerdefinierte Repositories**
 3. Füge `https://github.com/roberteinhaus/hass-emotionkit` hinzu und wähle den Typ **Integration**
@@ -66,6 +68,8 @@ Alle Auslöser stehen im Automations-Editor unter **Gerät → EmotionKit** zur 
 | `match_over` | Match beendet |
 | `match_won` | Match gewonnen (aus Sicht des Besitzers) |
 | `match_lost` | Match verloren (aus Sicht des Besitzers) |
+
+Spielen Spieler, die das Gerät benutzen dürfen, im selben Match gegeneinander, gibt es aus Sicht des Geräts keinen Sieger. Dann feuern nur die neutralen Auslöser: `match_over` und die Rundenergebnisse je Seite (`round_over_ct`, `round_over_t`), aber weder `match_won` noch `match_lost`. Das gilt auch, wenn „Auf alle Spieler reagieren“ eingeschaltet ist. Ob es gerade so ist, entscheidet der EmotionKit-Server und teilt es dem Gerät mit; wer das Match verlassen hat, zählt nicht mehr mit. Für ein gemeinsam genutztes Gerät, zum Beispiel auf einer LAN-Party, nimmst du deshalb am besten die neutralen Auslöser.
 
 ### Spieler
 
@@ -212,7 +216,7 @@ Die Vorlagen hören auf die Entität „Spielereignis" des EmotionKit-Geräts. W
 
 - **„Erneute Authentifizierung erforderlich“** — Der EmotionKit-Server akzeptiert die Zugangsdaten nicht mehr, meist weil das Gerät in der Weboberfläche gelöscht wurde. Folge dem Dialog: Du bekommst einen neuen Claim-Code. Gerät, Entitäten und Automationen in Home Assistant bleiben erhalten.
 - **Andere Broker-Adresse** — Über **Neu konfigurieren** lässt sich die Adresse des MQTT-Brokers ändern. Unterstützt werden `tcp://host:1883` und `mqtt://` (unverschlüsselt), `tls://host:8883`, `ssl://` und `mqtts://` (TLS) sowie `ws://host/pfad` und `wss://host/pfad` (MQTT über WebSockets). Ein leeres Feld verwendet wieder die Adresse, die der EmotionKit-Server meldet.
-- **Fehlersuche** — Auf der Geräteseite lässt sich über **Diagnose herunterladen** ein Bericht erzeugen. Zugangsdaten sind darin geschwärzt.
+- **Fehlersuche** — Auf der Geräteseite lässt sich über **Diagnose herunterladen** ein Bericht erzeugen. Zugangsdaten sind darin geschwärzt. Der Wert `mixed_sides` zeigt, ob gerade Spieler, die das Gerät benutzen dürfen, gegeneinander spielen; dann gibt es weder `match_won` noch `match_lost`.
 
 ## Entwicklung
 

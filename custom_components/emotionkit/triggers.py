@@ -137,7 +137,8 @@ def map_events(
 
     env provides the envelope fields for the event data, events are the ones
     to map (usually a filtered subset of env.events). reference_side is the
-    side match_won / match_lost are judged from.
+    side match_won / match_lost are judged from; without one (unknown, or
+    the device takes no side) a match ends with match_over only.
     """
     base = _base_data(env)
     triggers: list[Trigger] = []

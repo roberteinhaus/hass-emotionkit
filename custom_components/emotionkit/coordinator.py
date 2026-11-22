@@ -571,6 +571,9 @@ class EmotionKitRuntime:
                 "score_ct": snapshot.score_ct,
                 "score_t": snapshot.score_t,
                 "players_in_match": len(processor.tracker.active_subjects),
+                # True: the device's players are opponents, so a match ends
+                # without match_won / match_lost.
+                "mixed_sides": processor.tracker.mixed_sides,
             },
             "last_trigger": {
                 "type": processor.last_trigger_type,

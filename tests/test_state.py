@@ -536,6 +536,32 @@ class ReferenceSideTest(TrackerTestCase):
     def test_nothing_seen(self) -> None:
         self.assertEqual(self.tracker.reference_side(OWNER, any_player=True), "")
 
+    def test_no_side_while_the_devices_players_are_opponents(self) -> None:
+        self.feed(envelope(subject=OWNER, side="T"))
+        self.assertFalse(self.tracker.mixed_sides)
+        self.feed({**envelope(subject=MATE, side="CT"), "mixed_sides": True})
+        self.assertTrue(self.tracker.mixed_sides)
+        self.assertEqual(self.tracker.reference_side(OWNER, any_player=False), "")
+        self.assertEqual(self.tracker.reference_side(OWNER, any_player=True), "")
+        self.assertEqual(self.tracker.reference_side(None, any_player=False), "")
+        # The server takes it back with any later packet of the match.
+        self.feed(envelope(subject=OWNER, side="T"))
+        self.assertFalse(self.tracker.mixed_sides)
+        self.assertEqual(self.tracker.reference_side(OWNER, any_player=False), "T")
+
+    def test_mixed_sides_ends_with_the_match(self) -> None:
+        self.feed({**envelope(subject=OWNER, side="T"), "mixed_sides": True})
+        self.assertTrue(self.tracker.mixed_sides)
+        self.feed(menu_envelope(event("match_left", subject=OWNER)))
+        self.assertFalse(self.tracker.mixed_sides)
+
+    def test_mixed_sides_of_a_match_not_followed_does_not_count(self) -> None:
+        self.feed(envelope(subject=OWNER, side="T"))
+        other = envelope(subject=MATE, side="CT", match_id="match-2")
+        result = self.feed({**other, "mixed_sides": True})
+        self.assertFalse(result.followed)
+        self.assertFalse(self.tracker.mixed_sides)
+
 
 if __name__ == "__main__":
     unittest.main()

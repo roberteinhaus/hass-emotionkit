@@ -186,6 +186,22 @@ class OwnerFilterTest(ProcessorTestCase):
         )
         self.assertEqual([t.type for t in result.triggers], ["match_over", "match_won"])
 
+    def test_no_winner_while_the_devices_players_are_opponents(self) -> None:
+        self.feed(envelope(subject=OWNER, side="CT"))
+        over = envelope(event("match_over", side="T"), subject=MATE, side="T")
+        over["mixed_sides"] = True
+        self.assertEqual(self.types(self.feed(over)), ["match_over"])
+        # ... also when the device reacts to all players.
+        processor = EventProcessor(all_players=True)
+        processor.handle_config(raw(OWNER_CONFIG), retained=True)
+        result = processor.handle_event(raw(over), monotonic=1.0)
+        self.assertEqual([t.type for t in result.triggers], ["match_over"])
+
+    def test_rounds_still_have_a_winner_for_opponents(self) -> None:
+        over = envelope(event("round_over", side="T", round=3), subject=OWNER, side="CT")
+        over["mixed_sides"] = True
+        self.assertIn("round_over_t", self.types(self.feed(over)))
+
 
 class LeavingTest(ProcessorTestCase):
     def test_match_left(self) -> None:
