@@ -9,6 +9,7 @@ import _support  # noqa: F401
 from _support import MATE, OWNER, envelope, event, menu_envelope, raw
 
 from custom_components.emotionkit.engine import (
+    BOMB_WARNING_SECONDS,
     IGNORED_DISABLED,
     IGNORED_DUPLICATE,
     IGNORED_INVALID,
@@ -268,7 +269,7 @@ class ResyncAndStalenessTest(ProcessorTestCase):
             ("1999-01-01T00:00:00Z", "1999-01-01T00:00:05Z", "1999-01-01T00:00:10Z")
         ):
             result = self.feed(
-                envelope(event("player_kill", subject=OWNER, value=index + 1), occurred_at=stamp),
+                envelope(event("player_kill", subject=OWNER, value=1, round=index + 1), occurred_at=stamp),
                 dt=5.0,
             )
             self.assertFalse(result.stale)
@@ -513,6 +514,148 @@ class ActivityWatchdogTest(unittest.TestCase):
         self.assertIsNone(watchdog.next_deadline())
         self.assertEqual(watchdog.poll(1000.0), (False, False))
 
+
+class OwnSideTest(ProcessorTestCase):
+    def test_round_and_lead_from_the_owners_side(self) -> None:
+        self.feed(envelope(subject=OWNER, side="T"))
+        result = self.feed(
+            envelope(
+                event("round_over", side="T", round=3),
+                event("win_streak", side="T", round=3, value=3),
+                event("lead_taken", side="T", round=3),
+                subject=MATE,
+                side="T",
+            )
+        )
+        self.assertEqual(
+            self.types(result), ["round_over_t", "round_won", "win_streak", "lead_taken"]
+        )
+
+    def test_nothing_is_judged_while_the_devices_players_are_opponents(self) -> None:
+        self.feed(envelope(subject=OWNER, side="T"))
+        message = envelope(
+            event("round_over", side="T", round=3),
+            event("win_streak", side="T", round=3, value=3),
+            event("score_tied", side="T", round=3),
+            subject=MATE,
+            side="CT",
+        )
+        message["mixed_sides"] = True
+        self.assertEqual(self.types(self.feed(message)), ["round_over_t"])
+
+
+class BombWarningTest(ProcessorTestCase):
+    """bomb_10s is timed here: the server only says when the bomb was planted."""
+
+    def plant(self, **kwargs: Any) -> EventResult:
+        return self.feed(envelope(event("bomb_planted", round=4, **kwargs), bomb="planted"))
+
+    def test_due_ten_seconds_before_the_bomb_goes_off(self) -> None:
+        self.assertIsNone(self.processor.bomb_warning_at)
+        self.plant(value=40)
+        planted = self.now
+        self.assertEqual(self.processor.bomb_warning_at, planted + 40 - BOMB_WARNING_SECONDS)
+
+        self.assertIsNone(self.processor.take_bomb_warning(planted + 20))
+        self.assertIsNotNone(self.processor.bomb_warning_at)
+        trigger = self.processor.take_bomb_warning(planted + 30)
+        assert trigger is not None
+        self.assertEqual(trigger.type, "bomb_10s")
+        self.assertEqual(trigger.data["value"], BOMB_WARNING_SECONDS)
+        self.assertEqual(trigger.data["round"], 4)
+        self.assertEqual(trigger.data["match_id"], "match-1")
+        self.assertEqual(self.processor.last_trigger_type, "bomb_10s")
+        # Once.
+        self.assertIsNone(self.processor.bomb_warning_at)
+        self.assertIsNone(self.processor.take_bomb_warning(planted + 31))
+
+    def test_timer_that_fires_a_moment_early_counts(self) -> None:
+        self.plant(value=40)
+        self.assertIsNotNone(self.processor.take_bomb_warning(self.now + 29.9))
+
+    def test_server_without_a_timer_means_forty_seconds(self) -> None:
+        for value in (None, 0, 5, 500):
+            with self.subTest(value=value):
+                processor = EventProcessor()
+                kwargs = {} if value is None else {"value": value}
+                processor.handle_event(
+                    raw(envelope(event("bomb_planted", round=4, **kwargs), bomb="planted")),
+                    monotonic=100.0,
+                )
+                self.assertEqual(processor.bomb_warning_at, 130.0)
+
+    def test_other_timer(self) -> None:
+        self.plant(value=35)
+        self.assertEqual(self.processor.bomb_warning_at, self.now + 25)
+
+    def test_a_late_message_shortens_the_wait(self) -> None:
+        # Two messages set the baseline of the clock; the plant then arrives
+        # four seconds after the server stamped it.
+        self.feed(envelope(phase="live", occurred_at="2026-11-18T20:15:00.000Z"), dt=0.0)
+        self.feed(envelope(phase="live", occurred_at="2026-11-18T20:15:01.000Z"), dt=1.0)
+        self.feed(
+            envelope(
+                event("bomb_planted", round=4, value=40),
+                bomb="planted",
+                occurred_at="2026-11-18T20:15:02.000Z",
+            ),
+            dt=5.0,
+        )
+        self.assertAlmostEqual(self.processor.bomb_warning_at, self.now - 4 + 30)
+
+    def test_defuse_explosion_and_new_round_cancel_it(self) -> None:
+        for ending in (
+            envelope(event("bomb_defused", round=4), bomb="defused"),
+            envelope(event("bomb_exploded", round=4), bomb="exploded"),
+            envelope(event("round_freezetime", round=5), phase="freezetime"),
+            menu_envelope(event("match_left", subject=OWNER)),
+        ):
+            with self.subTest(ending=ending.get("events")):
+                self.setUp()
+                self.plant(value=40)
+                self.feed(ending)
+                self.assertIsNone(self.processor.bomb_warning_at)
+                self.assertIsNone(self.processor.take_bomb_warning(self.now + 60))
+
+    def test_other_messages_keep_it(self) -> None:
+        self.plant(value=40)
+        due = self.processor.bomb_warning_at
+        self.feed(envelope(event("player_kill", subject=OWNER, value=1), bomb="planted"))
+        self.feed(envelope(bomb="planted"))
+        self.assertEqual(self.processor.bomb_warning_at, due)
+
+    def test_no_warning_for_a_plant_noticed_late(self) -> None:
+        # The plant itself was missed; the payload shows the bomb.
+        self.feed(envelope(event("round_live", round=4), phase="live"))
+        result = self.feed(envelope(phase="live", bomb="planted"))
+        self.assertEqual(self.types(result), ["bomb_planted"])
+        self.assertIs(result.triggers[0].data["resync"], True)
+        self.assertIsNone(self.processor.bomb_warning_at)
+
+    def test_no_warning_from_a_stale_message(self) -> None:
+        self.feed(envelope(phase="live", occurred_at="2026-11-18T20:15:00.000Z"), dt=0.0)
+        self.feed(envelope(phase="live", occurred_at="2026-11-18T20:16:00.000Z"), dt=60.0)
+        result = self.feed(
+            envelope(
+                event("bomb_planted", round=4, value=40),
+                bomb="planted",
+                occurred_at="2026-11-18T20:16:01.000Z",
+            ),
+            dt=40.0,
+        )
+        self.assertTrue(result.stale)
+        self.assertIsNone(self.processor.bomb_warning_at)
+
+    def test_disabling_and_resetting_cancel_it(self) -> None:
+        self.plant(value=40)
+        self.processor.handle_config(raw({"enabled": False}), retained=False)
+        self.assertIsNone(self.processor.bomb_warning_at)
+
+        self.processor.handle_config(raw({"enabled": True}), retained=False)
+        self.plant(value=40)
+        self.assertIsNotNone(self.processor.bomb_warning_at)
+        self.processor.reset_state()
+        self.assertIsNone(self.processor.bomb_warning_at)
 
 if __name__ == "__main__":
     unittest.main()

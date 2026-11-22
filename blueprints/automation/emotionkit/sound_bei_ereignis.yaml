@@ -52,10 +52,32 @@ blueprint:
               value: match_won
             - label: Match verloren
               value: match_lost
+            - label: Runde gewonnen
+              value: round_won
+            - label: Runde verloren
+              value: round_lost
+            - label: Führung übernommen
+              value: lead_taken
+            - label: Ausgleich erzielt
+              value: lead_equalized
+            - label: Ausgleich kassiert
+              value: lead_tied
+            - label: In Rückstand geraten
+              value: lead_behind
+            - label: Siegesserie (ab 3 Runden)
+              value: win_streak
+            - label: "Bombe: noch 10 Sekunden"
+              value: bomb_10s
             - label: Kill
               value: player_kill
             - label: Kopfschuss-Kill
               value: player_headshot
+            - label: Doppelkill
+              value: double_kill
+            - label: Dreifachkill
+              value: triple_kill
+            - label: Vierfachkill
+              value: quad_kill
             - label: Ace
               value: ace
             - label: Tod

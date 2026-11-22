@@ -74,10 +74,24 @@ EVENT_MATCH_OVER: Final = "match_over"
 EVENT_MATCH_WON: Final = "match_won"
 EVENT_MATCH_LOST: Final = "match_lost"
 EVENT_HALFTIME: Final = "halftime"
+# From the point of view of the device's side. None of them fires while the
+# device takes no side (its players are opponents).
+EVENT_ROUND_WON: Final = "round_won"
+EVENT_ROUND_LOST: Final = "round_lost"
+EVENT_LEAD_TAKEN: Final = "lead_taken"
+EVENT_LEAD_EQUALIZED: Final = "lead_equalized"
+EVENT_LEAD_TIED: Final = "lead_tied"
+EVENT_LEAD_BEHIND: Final = "lead_behind"
+EVENT_WIN_STREAK: Final = "win_streak"
+# Ten seconds before the bomb goes off; timed by the integration itself.
+EVENT_BOMB_10S: Final = "bomb_10s"
 
 EVENT_PLAYER_KILL: Final = "player_kill"
 EVENT_PLAYER_HEADSHOT: Final = "player_headshot"
 EVENT_ACE: Final = "ace"
+EVENT_DOUBLE_KILL: Final = "double_kill"
+EVENT_TRIPLE_KILL: Final = "triple_kill"
+EVENT_QUAD_KILL: Final = "quad_kill"
 EVENT_PLAYER_DEATH: Final = "player_death"
 EVENT_PLAYER_FLASHED: Final = "player_flashed"
 EVENT_PLAYER_LOW_HEALTH: Final = "player_low_health"
@@ -100,6 +114,14 @@ MATCH_TRIGGER_TYPES: Final = (
     EVENT_MATCH_WON,
     EVENT_MATCH_LOST,
     EVENT_HALFTIME,
+    EVENT_ROUND_WON,
+    EVENT_ROUND_LOST,
+    EVENT_LEAD_TAKEN,
+    EVENT_LEAD_EQUALIZED,
+    EVENT_LEAD_TIED,
+    EVENT_LEAD_BEHIND,
+    EVENT_WIN_STREAK,
+    EVENT_BOMB_10S,
 )
 
 # Triggers about a single player. By default they fire for the device owner
@@ -107,6 +129,9 @@ MATCH_TRIGGER_TYPES: Final = (
 PLAYER_TRIGGER_TYPES: Final = (
     EVENT_PLAYER_KILL,
     EVENT_PLAYER_HEADSHOT,
+    EVENT_DOUBLE_KILL,
+    EVENT_TRIPLE_KILL,
+    EVENT_QUAD_KILL,
     EVENT_ACE,
     EVENT_PLAYER_DEATH,
     EVENT_PLAYER_FLASHED,

@@ -13,7 +13,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .clock import DEFAULT_MAX_AGE, ClockOffsetEstimator
-from .const import MAX_DEVICE_NAME_LENGTH, MAX_IDLE_TIMEOUT
+from .const import (
+    EVENT_BOMB_10S,
+    EVENT_BOMB_PLANTED,
+    MAX_DEVICE_NAME_LENGTH,
+    MAX_IDLE_TIMEOUT,
+)
 from .protocol import (
     DeviceConfig,
     as_int,
@@ -28,6 +33,14 @@ from .triggers import Trigger, map_events
 REMOTE_ACTOR_NAME = "actor_name"
 REMOTE_IDLE_TIMEOUT = "idle_timeout_s"
 _REMOTE_KEYS = (REMOTE_ACTOR_NAME, REMOTE_IDLE_TIMEOUT)
+
+# The bomb warning fires this many seconds before the bomb goes off.
+BOMB_WARNING_SECONDS = 10
+# Seconds from the plant to the explosion when the server does not say.
+DEFAULT_BOMB_TIMER = 40
+_BOMB_TIMER_RANGE = range(15, 121)
+# A timer may fire this much early and still counts as due.
+_TIMER_SLACK = 0.25
 
 IGNORED_INVALID = "invalid"
 IGNORED_DISABLED = "disabled"
@@ -149,6 +162,9 @@ class EventProcessor:
         # Envelope ids seen recently: QoS 1 may deliver a message twice.
         self._recent_ids: deque[str] = deque(maxlen=256)
         self._recent_id_set: set[str] = set()
+        # When the bomb warning is due (monotonic), and the data of the plant.
+        self._bomb_warning_at: float | None = None
+        self._bomb_warning_data: dict[str, Any] = {}
 
     @property
     def owner(self) -> str | None:
@@ -162,7 +178,54 @@ class EventProcessor:
 
     def reset_state(self) -> bool:
         """Put the entities back to idle. Returns True if anything changed."""
+        self._bomb_warning_at = None
         return self.tracker.reset()
+
+    @property
+    def bomb_warning_at(self) -> float | None:
+        """Return the monotonic time the bomb warning is due, if one is."""
+        return self._bomb_warning_at
+
+    def take_bomb_warning(self, monotonic: float) -> Trigger | None:
+        """Return the bomb warning if it is due, and forget it.
+
+        The caller sets a timer for `bomb_warning_at` and asks here when it
+        fires. None means: not due yet, or no longer wanted.
+        """
+        due = self._bomb_warning_at
+        if due is None or monotonic < due - _TIMER_SLACK:
+            return None
+        self._bomb_warning_at = None
+        if not self.enabled or not self.tracker.snapshot.bomb_planted:
+            return None
+        self.stats["triggers"] += 1
+        self.last_trigger_type = EVENT_BOMB_10S
+        return Trigger(
+            EVENT_BOMB_10S, {**self._bomb_warning_data, "value": BOMB_WARNING_SECONDS}
+        )
+
+    def _plan_bomb_warning(self, triggers: list[Trigger], monotonic: float) -> None:
+        """Arm the bomb warning after a plant, drop it when the bomb is gone.
+
+        The plant happened when the server stamped the message, which is
+        `clock.last_age` seconds ago. A plant that was only noticed later
+        (resync) has no known time and gets no warning.
+        """
+        for trigger in triggers:
+            if trigger.type != EVENT_BOMB_PLANTED or trigger.data.get("resync"):
+                continue
+            seconds = trigger.data.get("value")
+            if not isinstance(seconds, int) or seconds not in _BOMB_TIMER_RANGE:
+                seconds = DEFAULT_BOMB_TIMER
+            age = self.clock.last_age or 0.0
+            due = monotonic - age + seconds - BOMB_WARNING_SECONDS
+            if due > monotonic:
+                self._bomb_warning_at = due
+                self._bomb_warning_data = {
+                    key: value for key, value in trigger.data.items() if key != "value"
+                }
+        if not self.tracker.snapshot.bomb_planted:
+            self._bomb_warning_at = None
 
     # ------------------------------------------------------------------
 
@@ -232,6 +295,7 @@ class EventProcessor:
             self.stats["triggers"] += len(triggers)
             self.last_trigger_type = triggers[-1].type
             self.last_trigger_at = envelope.occurred_at
+        self._plan_bomb_warning(triggers, monotonic)
 
         return EventResult(
             triggers=tuple(triggers),
@@ -256,7 +320,7 @@ class EventProcessor:
             enabled_changed = True
             # Whatever happens while disabled is not seen, so start from
             # scratch in both directions.
-            state_changed = self.tracker.reset()
+            state_changed = self.reset_state()
 
         if config.allowed_subjects is not None:
             self.allowed_subjects = config.allowed_subjects

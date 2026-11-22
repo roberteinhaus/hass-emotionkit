@@ -73,8 +73,19 @@ class LegacyTriggerNamesTest(unittest.TestCase):
                 "match_won",
                 "match_lost",
                 "halftime",
+                "round_won",
+                "round_lost",
+                "lead_taken",
+                "lead_equalized",
+                "lead_tied",
+                "lead_behind",
+                "win_streak",
+                "bomb_10s",
                 "player_kill",
                 "player_headshot",
+                "double_kill",
+                "triple_kill",
+                "quad_kill",
                 "ace",
                 "player_death",
                 "player_flashed",
@@ -153,9 +164,33 @@ class PlayerTriggersTest(unittest.TestCase):
                 self.assertEqual(types(mapped(event(kind, subject=OWNER))), [kind])
 
     def test_kill(self) -> None:
-        triggers = mapped(event("player_kill", subject=OWNER, side="CT", value=2, round=5))
+        triggers = mapped(event("player_kill", subject=OWNER, side="CT", value=1, round=5))
         self.assertEqual(types(triggers), ["player_kill"])
         self.assertIs(triggers[0].data["headshot"], False)
+
+    def test_multi_kills(self) -> None:
+        for kills, name in ((2, "double_kill"), (3, "triple_kill"), (4, "quad_kill")):
+            with self.subTest(kills=kills):
+                triggers = mapped(
+                    event("player_kill", subject=OWNER, side="CT", value=kills, round=5)
+                )
+                self.assertEqual(types(triggers), ["player_kill", name])
+                self.assertEqual(triggers[1].data["value"], kills)
+                self.assertEqual(triggers[1].data["subject"], OWNER)
+        # The fifth kill is the ace, which the server reports itself.
+        triggers = mapped(
+            event("player_kill", subject=OWNER, value=5, round=5),
+            event("ace", subject=OWNER, round=5),
+        )
+        self.assertEqual(types(triggers), ["player_kill", "ace"])
+        # After a headshot: kill, headshot, then the count.
+        triggers = mapped(event("player_kill", subject=OWNER, value=3, headshot=True))
+        self.assertEqual(types(triggers), ["player_kill", "player_headshot", "triple_kill"])
+
+    def test_multi_kills_of_other_players(self) -> None:
+        kill = event("player_kill", subject=MATE, value=2, round=5)
+        self.assertEqual(types(mapped(kill)), [])
+        self.assertEqual(types(mapped(kill, all_players=True)), ["player_kill", "double_kill"])
 
     def test_headshot_kill_fires_both(self) -> None:
         triggers = mapped(event("player_kill", subject=OWNER, value=1, headshot=True, round=5))
@@ -274,6 +309,52 @@ class TriggerDataTest(unittest.TestCase):
         )
         self.assertEqual(map_events(Envelope(), (), owner=None, all_players=True), [])
 
+
+class OwnSideTriggersTest(unittest.TestCase):
+    """What is judged from the side the device is on."""
+
+    def test_round_won_and_lost(self) -> None:
+        over = event("round_over", side="CT", reason="defuse", round=7)
+        won = mapped(over, reference_side="CT")
+        self.assertEqual(types(won), ["round_over_ct", "round_won"])
+        self.assertEqual(won[1].data["player_side"], "CT")
+        self.assertEqual(won[1].data["reason"], "defuse")
+        self.assertEqual(types(mapped(over, reference_side="T")), ["round_over_ct", "round_lost"])
+
+    def test_no_side_no_judgement(self) -> None:
+        # Unknown side, or the device's players are opponents.
+        for name in ("round_over", "lead_taken", "score_tied", "win_streak"):
+            with self.subTest(event=name):
+                triggers = mapped(event(name, side="T", round=7, value=3))
+                self.assertEqual(
+                    types(triggers), ["round_over_t"] if name == "round_over" else []
+                )
+
+    def test_lead(self) -> None:
+        cases = {
+            ("lead_taken", "CT"): "lead_taken",
+            ("lead_taken", "T"): "lead_behind",
+            ("score_tied", "CT"): "lead_equalized",
+            ("score_tied", "T"): "lead_tied",
+        }
+        for (server, side), trigger in cases.items():
+            with self.subTest(server=server, side=side):
+                triggers = mapped(event(server, side=side, round=9), reference_side="CT")
+                self.assertEqual(types(triggers), [trigger])
+                self.assertEqual(triggers[0].data["side"], side)
+                self.assertEqual(triggers[0].data["player_side"], "CT")
+                self.assertEqual(triggers[0].data["round"], 9)
+
+    def test_win_streak_of_the_own_team_only(self) -> None:
+        streak = event("win_streak", side="T", value=4, round=9)
+        own = mapped(streak, reference_side="T")
+        self.assertEqual(types(own), ["win_streak"])
+        self.assertEqual(own[0].data["value"], 4)
+        self.assertEqual(types(mapped(streak, reference_side="CT")), [])
+
+    def test_events_without_a_side_are_ignored(self) -> None:
+        for name in ("lead_taken", "score_tied", "win_streak"):
+            self.assertEqual(types(mapped(event(name, round=3), reference_side="CT")), [])
 
 if __name__ == "__main__":
     unittest.main()

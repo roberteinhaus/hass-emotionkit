@@ -172,6 +172,9 @@ class EmotionKitRuntime:
         )
         self._task: asyncio.Task[None] | None = None
         self._timer: CALLBACK_TYPE | None = None
+        # Timer for the bomb warning and the time it is set for.
+        self._bomb_timer: CALLBACK_TYPE | None = None
+        self._bomb_timer_at: float | None = None
         self._handler_errors = 0
         self._last_broker_refresh: float | None = None
 
@@ -211,6 +214,10 @@ class EmotionKitRuntime:
         if self._timer is not None:
             self._timer()
             self._timer = None
+        if self._bomb_timer is not None:
+            self._bomb_timer()
+            self._bomb_timer = None
+        self._bomb_timer_at = None
 
         task, self._task = self._task, None
         if task is None:
@@ -394,6 +401,7 @@ class EmotionKitRuntime:
             self._notify_state()
         for trigger in result.triggers:
             self._fire(trigger.type, trigger.data)
+        self._sync_bomb_timer()
 
     async def _handle_config(
         self, client: aiomqtt.Client, payload: object, *, retained: bool
@@ -415,6 +423,7 @@ class EmotionKitRuntime:
             self._persist(option_updates)
         if result.state_changed:
             self._notify_state()
+        self._sync_bomb_timer()
 
         # The handshake asks for the full status after every config change.
         await self._publish_status(client)
@@ -505,6 +514,7 @@ class EmotionKitRuntime:
         idle, expired = self.watchdog.poll(time.monotonic())
         if expired and self.processor.reset_state():
             self._notify_state()
+        self._sync_bomb_timer()
         if idle:
             _LOGGER.debug("No game activity for %s s", self.idle_timeout)
             self._fire(
@@ -516,6 +526,34 @@ class EmotionKitRuntime:
                 },
             )
         self._ensure_timer()
+
+    # --- bomb warning ----------------------------------------------------
+
+    @callback
+    def _sync_bomb_timer(self) -> None:
+        """Keep the timer in step with what the processor has planned."""
+        due = self.processor.bomb_warning_at
+        if due == self._bomb_timer_at:
+            return
+        if self._bomb_timer is not None:
+            self._bomb_timer()
+            self._bomb_timer = None
+        self._bomb_timer_at = due
+        if due is not None:
+            delay = max(due - time.monotonic(), 0.0)
+            self._bomb_timer = async_call_later(
+                self.hass, delay, self._async_bomb_timer_fired
+            )
+
+    @callback
+    def _async_bomb_timer_fired(self, _now: datetime) -> None:
+        self._bomb_timer = None
+        self._bomb_timer_at = None
+        trigger = self.processor.take_bomb_warning(time.monotonic())
+        if trigger is not None:
+            self._fire(trigger.type, trigger.data)
+        # Fired a moment early: the warning is still planned, set it again.
+        self._sync_bomb_timer()
 
     # --- diagnostics -----------------------------------------------------
 
@@ -574,6 +612,7 @@ class EmotionKitRuntime:
                 # True: the device's players are opponents, so a match ends
                 # without match_won / match_lost.
                 "mixed_sides": processor.tracker.mixed_sides,
+                "bomb_warning_pending": processor.bomb_warning_at is not None,
             },
             "last_trigger": {
                 "type": processor.last_trigger_type,

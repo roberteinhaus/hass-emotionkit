@@ -54,6 +54,7 @@ Alle Auslöser stehen im Automations-Editor unter **Gerät → EmotionKit** zur 
 | `bomb_planted` | Bombe wurde gelegt |
 | `bomb_defused` | Bombe wurde entschärft |
 | `bomb_exploded` | Bombe ist explodiert |
+| `bomb_10s` | Noch zehn Sekunden bis zur Explosion. Die Integration misst die Zeit selbst ab `bomb_planted`; wird die Bombe vorher entschärft, bleibt der Auslöser aus |
 | `freezetime` | Freezetime (Kaufzeit) hat begonnen |
 | `round_live` | Runde gestartet (Freezetime vorbei) |
 | `round_over_t` | Terroristen haben die Runde gewonnen |
@@ -68,8 +69,17 @@ Alle Auslöser stehen im Automations-Editor unter **Gerät → EmotionKit** zur 
 | `match_over` | Match beendet |
 | `match_won` | Match gewonnen (aus Sicht des Besitzers) |
 | `match_lost` | Match verloren (aus Sicht des Besitzers) |
+| `round_won` | Runde gewonnen (zusätzlich zu `round_over_ct` oder `round_over_t`) |
+| `round_lost` | Runde verloren |
+| `lead_taken` | Führung übernommen: der Spielstand war ausgeglichen, jetzt liegt dein Team vorn |
+| `lead_equalized` | Ausgleich erzielt: dein Team lag hinten, jetzt steht es gleich |
+| `lead_tied` | Ausgleich kassiert: dein Team lag vorn, jetzt steht es gleich |
+| `lead_behind` | In Rückstand geraten: der Spielstand war ausgeglichen, jetzt liegt der Gegner vorn |
+| `win_streak` | Dein Team hat drei oder mehr Runden in Folge gewonnen. `value` nennt die Zahl; der Auslöser feuert mit jeder weiteren Runde der Serie erneut, auch über den Seitenwechsel hinweg |
 
-Spielen Spieler, die das Gerät benutzen dürfen, im selben Match gegeneinander, gibt es aus Sicht des Geräts keinen Sieger. Dann feuern nur die neutralen Auslöser: `match_over` und die Rundenergebnisse je Seite (`round_over_ct`, `round_over_t`), aber weder `match_won` noch `match_lost`. Das gilt auch, wenn „Auf alle Spieler reagieren“ eingeschaltet ist. Ob es gerade so ist, entscheidet der EmotionKit-Server und teilt es dem Gerät mit; wer das Match verlassen hat, zählt nicht mehr mit. Für ein gemeinsam genutztes Gerät, zum Beispiel auf einer LAN-Party, nimmst du deshalb am besten die neutralen Auslöser.
+Alles „aus Sicht des Besitzers“ richtet sich nach der Seite, auf der das Gerät steht: der des Besitzers, oder mit „Auf alle Spieler reagieren“ der des zuletzt gesehenen Spielers. Spielt der Besitzer nicht mit und reagiert das Gerät nur auf ihn, feuern diese Auslöser nicht.
+
+Spielen Spieler, die das Gerät benutzen dürfen, im selben Match gegeneinander, gibt es aus Sicht des Geräts keinen Sieger. Dann feuern nur die neutralen Auslöser: `match_over` und die Rundenergebnisse je Seite (`round_over_ct`, `round_over_t`), aber weder `match_won` und `match_lost` noch `round_won`, `round_lost`, die vier Auslöser zur Führung oder `win_streak`. Das gilt auch, wenn „Auf alle Spieler reagieren“ eingeschaltet ist. Ob es gerade so ist, entscheidet der EmotionKit-Server und teilt es dem Gerät mit; wer das Match verlassen hat, zählt nicht mehr mit. Für ein gemeinsam genutztes Gerät, zum Beispiel auf einer LAN-Party, nimmst du deshalb am besten die neutralen Auslöser.
 
 ### Spieler
 
@@ -79,6 +89,9 @@ Diese Auslöser feuern standardmäßig nur für den **Besitzer** des Geräts —
 |----------|--------------|
 | `player_kill` | Kill |
 | `player_headshot` | Kill per Kopfschuss (zusätzlich zu `player_kill`) |
+| `double_kill` | Zweiter Kill in derselben Runde (zusätzlich zu `player_kill`) |
+| `triple_kill` | Dritter Kill in derselben Runde |
+| `quad_kill` | Vierter Kill in derselben Runde. Der fünfte ist ein `ace` |
 | `ace` | Alle Gegner in einer Runde ausgeschaltet |
 | `player_death` | Ausgeschaltet worden |
 | `player_flashed` | Geblendet |
@@ -100,8 +113,9 @@ Jeder Auslöser ist ein Ereignis `emotionkit_event` auf dem Home-Assistant-Bus. 
 |------|-----------|
 | `round` | Rundennummer |
 | `side` | Betroffene Seite (`CT` oder `T`), z. B. der Sieger |
+| `player_side` | Seite, aus deren Sicht ein Auslöser wie `round_won` oder `lead_taken` gilt |
 | `reason` | Grund des Rundenendes (`elimination`, `bomb`, `defuse`, `time`) |
-| `value` | Zahlenwert, z. B. Kills in dieser Runde, Blendstärke (0–255) oder HP |
+| `value` | Zahlenwert, z. B. Kills in dieser Runde, Blendstärke (0–255), HP, Runden einer Siegesserie oder bei `bomb_planted` die Sekunden bis zur Explosion |
 | `subject` | SteamID des betroffenen Spielers |
 | `headshot` | `true` bei einem Kopfschuss-Kill |
 | `match_id` | Kennung des Matches |

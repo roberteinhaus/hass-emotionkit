@@ -178,7 +178,7 @@ class OriginalTests(unittest.TestCase):
             result = processor.handle_event(
                 raw(
                     envelope(
-                        event("player_kill", subject=_support.OWNER, value=index + 1),
+                        event("player_kill", subject=_support.OWNER, value=1, round=index + 1),
                         occurred_at=stamp,
                     )
                 ),

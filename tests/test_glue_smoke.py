@@ -458,6 +458,73 @@ class MessageFlowTest(GlueTestCase):
             self.hass.timers[-1]["action"](None)
             self.assertEqual(len(self.fired("idle")), 2)
 
+    async def test_bomb_warning_is_timed_here(self) -> None:
+        clock = types.SimpleNamespace(now=1000.0)
+        fake_time = types.SimpleNamespace(monotonic=lambda: clock.now)
+        with mock.patch.object(coordinator, "time", fake_time):
+            entry, runtime, client = await self.start()
+            entities = await self.add_entities(entry)
+
+            def bomb_timers() -> list[dict[str, Any]]:
+                # The idle timer waits 30.05 s, the bomb warning exactly 30.
+                return [t for t in self.hass.timers if abs(t["delay"] - 30.0) < 0.01]
+
+            client.deliver(
+                EVENT_TOPIC,
+                raw(envelope(event("bomb_planted", round=3, value=40), bomb="planted")),
+            )
+            await eventually(lambda: self.fired("bomb_planted"))
+            self.assertEqual(len(bomb_timers()), 1)
+            self.assertEqual(self.fired("bomb_10s"), [])
+
+            clock.now = 1030.0
+            bomb_timers()[0]["action"](None)
+            warning = self.fired("bomb_10s")
+            self.assertEqual(len(warning), 1)
+            self.assertEqual(warning[0]["device_id"], "registry-1")
+            self.assertEqual(warning[0]["round"], 3)
+            self.assertEqual(warning[0]["value"], 10)
+            self.assertEqual(entities["game_event"].triggered[-1][0], "bomb_10s")
+
+            # The next bomb is defused in time: its timer is cancelled.
+            clock.now = 1100.0
+            later = "2026-11-18T20:16:44.123Z"
+            client.deliver(
+                EVENT_TOPIC,
+                raw(
+                    envelope(
+                        event("round_freezetime", round=4),
+                        phase="freezetime",
+                        occurred_at=later,
+                    )
+                ),
+            )
+            client.deliver(
+                EVENT_TOPIC,
+                raw(
+                    envelope(
+                        event("bomb_planted", round=4, value=40),
+                        bomb="planted",
+                        occurred_at=later,
+                    )
+                ),
+            )
+            await eventually(lambda: len(self.fired("bomb_planted")) == 2)
+            self.assertEqual(len(bomb_timers()), 2)
+            timer = bomb_timers()[1]
+            self.assertFalse(timer["cancelled"])
+            client.deliver(
+                EVENT_TOPIC,
+                raw(
+                    envelope(
+                        event("bomb_defused", round=4), bomb="defused", occurred_at=later
+                    )
+                ),
+            )
+            await eventually(lambda: self.fired("bomb_defused"))
+            self.assertTrue(timer["cancelled"])
+            self.assertEqual(len(self.fired("bomb_10s")), 1)
+
     async def test_idle_timeout_zero_disables_the_trigger(self) -> None:
         clock = types.SimpleNamespace(now=1000.0)
         fake_time = types.SimpleNamespace(monotonic=lambda: clock.now)
@@ -737,7 +804,9 @@ class DiagnosticsAndTriggersTest(GlueTestCase):
         entry, runtime, client = await self.start()
         triggers = await device_trigger.async_get_triggers(self.hass, "registry-1")
         types_offered = [trigger["type"] for trigger in triggers]
-        self.assertEqual(len(types_offered), 21)
+        self.assertEqual(len(types_offered), 32)
+        for new in ("round_won", "lead_taken", "win_streak", "bomb_10s", "double_kill"):
+            self.assertIn(new, types_offered)
         for legacy in (
             "bomb_planted", "bomb_defused", "bomb_exploded", "round_live", "round_over_t",
             "round_over_ct", "freezetime", "idle",

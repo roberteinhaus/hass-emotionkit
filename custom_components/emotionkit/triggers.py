@@ -14,8 +14,13 @@ from .const import (
     EVENT_BOMB_DEFUSED,
     EVENT_BOMB_EXPLODED,
     EVENT_BOMB_PLANTED,
+    EVENT_DOUBLE_KILL,
     EVENT_FREEZETIME,
     EVENT_HALFTIME,
+    EVENT_LEAD_BEHIND,
+    EVENT_LEAD_EQUALIZED,
+    EVENT_LEAD_TAKEN,
+    EVENT_LEAD_TIED,
     EVENT_MATCH_LEFT,
     EVENT_MATCH_LOST,
     EVENT_MATCH_OVER,
@@ -27,9 +32,14 @@ from .const import (
     EVENT_PLAYER_KILL,
     EVENT_PLAYER_LOW_HEALTH,
     EVENT_PLAYER_MVP,
+    EVENT_QUAD_KILL,
     EVENT_ROUND_LIVE,
+    EVENT_ROUND_LOST,
     EVENT_ROUND_OVER_CT,
     EVENT_ROUND_OVER_T,
+    EVENT_ROUND_WON,
+    EVENT_TRIPLE_KILL,
+    EVENT_WIN_STREAK,
 )
 from .protocol import (
     SIDES,
@@ -38,6 +48,7 @@ from .protocol import (
     SRV_BOMB_EXPLODED,
     SRV_BOMB_PLANTED,
     SRV_HALFTIME,
+    SRV_LEAD_TAKEN,
     SRV_MATCH_LEFT,
     SRV_MATCH_OVER,
     SRV_MATCH_START,
@@ -49,6 +60,8 @@ from .protocol import (
     SRV_ROUND_FREEZETIME,
     SRV_ROUND_LIVE,
     SRV_ROUND_OVER,
+    SRV_SCORE_TIED,
+    SRV_WIN_STREAK,
     Envelope,
     GameEvent,
 )
@@ -73,6 +86,16 @@ _PLAYER_LEVEL = {
     SRV_MATCH_LEFT: EVENT_MATCH_LEFT,
 }
 _ROUND_OVER = {"T": EVENT_ROUND_OVER_T, "CT": EVENT_ROUND_OVER_CT}
+# Server event about a side -> trigger when it is (the device's own side,
+# the other side). None: no trigger for that case.
+_FROM_OWN_SIDE = {
+    SRV_LEAD_TAKEN: (EVENT_LEAD_TAKEN, EVENT_LEAD_BEHIND),
+    SRV_SCORE_TIED: (EVENT_LEAD_EQUALIZED, EVENT_LEAD_TIED),
+    SRV_WIN_STREAK: (EVENT_WIN_STREAK, None),
+}
+# Kills of a player in the round -> trigger. Five are an ace, which the
+# server reports as an event of its own.
+_MULTI_KILL = {2: EVENT_DOUBLE_KILL, 3: EVENT_TRIPLE_KILL, 4: EVENT_QUAD_KILL}
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,8 +160,10 @@ def map_events(
 
     env provides the envelope fields for the event data, events are the ones
     to map (usually a filtered subset of env.events). reference_side is the
-    side match_won / match_lost are judged from; without one (unknown, or
-    the device takes no side) a match ends with match_over only.
+    side the device is on. Everything that is judged from it (match_won /
+    match_lost, round_won / round_lost, the lead, a winning streak) needs
+    one; without it (unknown, or the device takes no side) only the neutral
+    triggers fire.
     """
     base = _base_data(env)
     triggers: list[Trigger] = []
@@ -152,11 +177,29 @@ def map_events(
             )
 
         elif kind == SRV_ROUND_OVER:
-            trigger_type = _ROUND_OVER.get(event.side.upper())
+            winner = event.side.upper()
+            trigger_type = _ROUND_OVER.get(winner)
             if trigger_type is not None:
-                triggers.append(
-                    Trigger(trigger_type, _event_data(base, event, resync=resync))
-                )
+                data = _event_data(base, event, resync=resync)
+                triggers.append(Trigger(trigger_type, data))
+                if reference_side in SIDES:
+                    outcome = (
+                        EVENT_ROUND_WON if winner == reference_side else EVENT_ROUND_LOST
+                    )
+                    triggers.append(
+                        Trigger(outcome, {**data, "player_side": reference_side})
+                    )
+
+        elif kind in _FROM_OWN_SIDE:
+            side = event.side.upper()
+            if side in SIDES and reference_side in SIDES:
+                own, other = _FROM_OWN_SIDE[kind]
+                trigger_type = own if side == reference_side else other
+                if trigger_type is not None:
+                    data = _event_data(base, event, resync=resync)
+                    triggers.append(
+                        Trigger(trigger_type, {**data, "player_side": reference_side})
+                    )
 
         elif kind == SRV_MATCH_OVER:
             data = _event_data(base, event, resync=resync)
@@ -177,6 +220,8 @@ def map_events(
             triggers.append(Trigger(_PLAYER_LEVEL[kind], data))
             if kind == SRV_PLAYER_KILL and event.headshot:
                 triggers.append(Trigger(EVENT_PLAYER_HEADSHOT, dict(data)))
+            if kind == SRV_PLAYER_KILL and event.value in _MULTI_KILL:
+                triggers.append(Trigger(_MULTI_KILL[event.value], dict(data)))
 
         # Everything else (timeout, side_switch, player_burning, event types
         # of a newer server) has no trigger and is ignored.
